@@ -1,4 +1,6 @@
-opencv-python
-mediapipe
-numpy
-ultralytics
+opencv-python>=4.8.0
+ultralytics>=8.0.0
+mediapipe>=0.10.0
+numpy>=1.24.0
+onnxruntime>=1.15.0
+Pillow>=10.0.0
