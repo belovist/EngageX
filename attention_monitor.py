@@ -1,236 +1,223 @@
-"""Lightweight real-time attention monitoring pipeline.
-
-Stages:
-1) YOLOv8 Nano gatekeeper (presence + ROI cropping)
-2) MediaPipe Face Mesh + solvePnP for head pose
-3) Pluggable gaze estimator interface
-4) Weighted attentiveness score + EMA smoothing
+"""
+Real-Time Attention Monitoring System
+Main pipeline integrating all stages: Gatekeeper → Head Pose → Gaze → Score
 """
 
-from __future__ import annotations
-
-import argparse
-import math
-from dataclasses import dataclass
-from typing import Optional, Tuple
-
 import cv2
-import mediapipe as mp
 import numpy as np
-from ultralytics import YOLO
+from gatekeeper import Gatekeeper
+from head_pose import HeadPoseEstimator
+from gaze_tracker import GazeTracker
+from score_calculator import AttentivenessScoreCalculator
 
-
-@dataclass
-class HeadPose:
-    yaw: float
-    pitch: float
-    roll: float
-
-
-class Gatekeeper:
-    """YOLO gatekeeper for person presence and ROI cropping."""
-
-    def __init__(self, model_name: str = "yolov8n.pt", conf: float = 0.4):
-        self.model = YOLO(model_name)
-        self.conf = conf
-
-    def detect_person_roi(self, frame: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
-        results = self.model.predict(frame, conf=self.conf, verbose=False)
-        if not results:
-            return None
-
-        h, w = frame.shape[:2]
-        best_box = None
-        best_area = 0
-        for box in results[0].boxes:
-            cls = int(box.cls.item())
-            if cls != 0:  # COCO person class
-                continue
-            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(w - 1, x2), min(h - 1, y2)
-            area = (x2 - x1) * (y2 - y1)
-            if area > best_area:
-                best_area = area
-                best_box = (x1, y1, x2, y2)
-
-        return best_box
-
-
-class HeadPoseEstimator:
-    """MediaPipe Face Mesh + solvePnP head pose estimator."""
-
-    def __init__(self):
-        self.face_mesh = mp.solutions.face_mesh.FaceMesh(
-            static_image_mode=False,
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
+class AttentionMonitor:
+    """Main pipeline for real-time attention monitoring."""
+    
+    def __init__(self, 
+                 camera_id=0,
+                 yolo_model='yolov8n.pt',
+                 gaze_model_path=None,
+                 head_pose_weight=0.6,  # w1 = 0.6 (Pose Score weight)
+                 gaze_weight=0.4,       # w2 = 0.4 (Gaze Score weight)
+                 ema_alpha=0.3,         # α = 0.3 (EMA smoothing factor)
+                 display=True):
+        
+        # Initialize components
+        self.gatekeeper = Gatekeeper(model_path=yolo_model)
+        self.head_pose_estimator = HeadPoseEstimator()
+        self.gaze_tracker = GazeTracker(model_path=gaze_model_path)
+        self.score_calculator = AttentivenessScoreCalculator(
+            head_pose_weight=head_pose_weight,
+            gaze_weight=gaze_weight,
+            ema_alpha=ema_alpha
         )
+        
+        # Camera setup
+        self.camera_id = camera_id
+        self.cap = None
+        self.display = display
+        
+        # Base Statistics
+        self.frame_count = 0
+        self.person_detected_count = 0
+        self.head_pose_success_count = 0
+        self.gaze_success_count = 0
+        
+        # NEW: Session Analytics Tracking
+        self.session_scores = []
+        self.status_counts = {
+            "Highly Attentive": 0,
+            "Moderately Attentive": 0,
+            "Distracted": 0
+        }
 
-        # Landmark indices: nose tip, chin, left eye corner, right eye corner, left mouth, right mouth
-        self.landmark_ids = [1, 152, 33, 263, 61, 291]
-        self.model_points = np.array(
-            [
-                (0.0, 0.0, 0.0),
-                (0.0, -63.6, -12.5),
-                (-43.3, 32.7, -26.0),
-                (43.3, 32.7, -26.0),
-                (-28.9, -28.9, -24.1),
-                (28.9, -28.9, -24.1),
-            ],
-            dtype=np.float64,
-        )
+    def initialize_camera(self):
+        """Initialize webcam capture."""
+        self.cap = cv2.VideoCapture(self.camera_id)
+        if not self.cap.isOpened():
+            raise RuntimeError(f"Failed to open camera {self.camera_id}")
+        
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-    def estimate(self, frame_bgr: np.ndarray) -> Optional[HeadPose]:
-        h, w = frame_bgr.shape[:2]
-        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        result = self.face_mesh.process(rgb)
-        if not result.multi_face_landmarks:
-            return None
-
-        lm = result.multi_face_landmarks[0].landmark
-        image_points = []
-        for idx in self.landmark_ids:
-            x = lm[idx].x * w
-            y = lm[idx].y * h
-            image_points.append((x, y))
-        image_points = np.array(image_points, dtype=np.float64)
-
-        focal_length = w
-        center = (w / 2, h / 2)
-        camera_matrix = np.array(
-            [[focal_length, 0, center[0]], [0, focal_length, center[1]], [0, 0, 1]],
-            dtype=np.float64,
-        )
-        dist_coeffs = np.zeros((4, 1))
-
-        ok, rvec, _ = cv2.solvePnP(
-            self.model_points,
-            image_points,
-            camera_matrix,
-            dist_coeffs,
-            flags=cv2.SOLVEPNP_ITERATIVE,
-        )
-        if not ok:
-            return None
-
-        rotation_matrix, _ = cv2.Rodrigues(rvec)
-        sy = math.sqrt(rotation_matrix[0, 0] ** 2 + rotation_matrix[1, 0] ** 2)
-        singular = sy < 1e-6
-
-        if not singular:
-            pitch = math.atan2(rotation_matrix[2, 1], rotation_matrix[2, 2])
-            yaw = math.atan2(-rotation_matrix[2, 0], sy)
-            roll = math.atan2(rotation_matrix[1, 0], rotation_matrix[0, 0])
+    # NEW: Helper function to classify the score
+    def get_status_label(self, score):
+        if score >= 0.80:
+            return "Highly Attentive"
+        elif score >= 0.50:
+            return "Moderately Attentive"
         else:
-            pitch = math.atan2(-rotation_matrix[1, 2], rotation_matrix[1, 1])
-            yaw = math.atan2(-rotation_matrix[2, 0], sy)
-            roll = 0
+            return "Distracted"
 
-        return HeadPose(
-            yaw=math.degrees(yaw),
-            pitch=math.degrees(pitch),
-            roll=math.degrees(roll),
+    def draw_info(self, frame, bbox, head_pose_angles, gaze_vector, scores):
+        """Draw information overlay on frame."""
+        h, w = frame.shape[:2]
+        
+        if bbox is not None:
+            x1, y1, x2, y2 = bbox.astype(int)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, "Person Detected", (x1, y1 - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        if head_pose_angles:
+            yaw, pitch, roll = head_pose_angles['yaw'], head_pose_angles['pitch'], head_pose_angles['roll']
+            text = f"Head: Yaw={yaw:.1f} Pitch={pitch:.1f} Roll={roll:.1f}"
+            cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        if gaze_vector:
+            yaw, pitch = gaze_vector['yaw'], gaze_vector['pitch']
+            text = f"Gaze: Yaw={yaw:.1f} Pitch={pitch:.1f}"
+            cv2.putText(frame, text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        inst_score, smooth_score = scores
+        if inst_score is not None:
+            color = (0, int(255 * smooth_score), int(255 * (1 - smooth_score)))
+            
+            bar_width, bar_height = 200, 20
+            bar_x, bar_y = 10, h - 40
+            
+            cv2.rectangle(frame, (bar_x, bar_y), 
+                         (bar_x + bar_width, bar_y + bar_height), (50, 50, 50), -1)
+            
+            score_width = int(bar_width * smooth_score)
+            cv2.rectangle(frame, (bar_x, bar_y), 
+                         (bar_x + score_width, bar_y + bar_height), color, -1)
+            
+            # Fetch the text label for the UI
+            status_text = self.get_status_label(smooth_score)
+            score_text = f"{status_text}: {int(smooth_score * 100)}%"
+            cv2.putText(frame, score_text, (bar_x, bar_y - 5),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        stats_text = (f"Frames: {self.frame_count} | Person: {self.person_detected_count}")
+        cv2.putText(frame, stats_text, (10, h - 10),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+
+    def process_frame(self, frame):
+        """Process a single frame through the pipeline."""
+        self.frame_count += 1
+        
+        person_detected, cropped_frame, bbox = self.gatekeeper.process(frame)
+        if not person_detected:
+            return {'person_detected': False, 'bbox': None, 'head_pose_angles': None, 
+                    'gaze_vector': None, 'scores': (None, None)}
+        
+        self.person_detected_count += 1
+        
+        head_pose_success, head_pose_angles = self.head_pose_estimator.process(cropped_frame)
+        if head_pose_success: self.head_pose_success_count += 1
+        
+        gaze_success, gaze_vector = self.gaze_tracker.process(cropped_frame)
+        if gaze_success: self.gaze_success_count += 1
+        
+        instantaneous_score, smoothed_score = self.score_calculator.calculate(
+            head_pose_angles=head_pose_angles,
+            gaze_vector=gaze_vector,
+            emotion=None
         )
+        
+        return {
+            'person_detected': True,
+            'bbox': bbox,
+            'head_pose_angles': head_pose_angles,
+            'gaze_vector': gaze_vector,
+            'scores': (instantaneous_score, smoothed_score)
+        }
+
+    def run(self):
+        """Run the main monitoring loop."""
+        self.initialize_camera()
+        print("\nStarting Attention Monitoring System...")
+        print("Press 'q' to quit and view session summary.\n")
+        
+        try:
+            while True:
+                ret, frame = self.cap.read()
+                if not ret: break
+                
+                results = self.process_frame(frame)
+                inst_score, smooth_score = results['scores']
+                
+                # NEW: Track stats if a score was successfully calculated
+                if smooth_score is not None:
+                    self.session_scores.append(smooth_score)
+                    current_status = self.get_status_label(smooth_score)
+                    self.status_counts[current_status] += 1
+                    
+                    # UPDATED: Print score and status periodically
+                    if self.frame_count % 30 == 0:
+                        print(f"Frame {self.frame_count}: Score = {smooth_score:.2f}  --->  [{current_status}]")
+                
+                if self.display:
+                    self.draw_info(frame, results['bbox'], results['head_pose_angles'], 
+                                   results['gaze_vector'], results['scores'])
+                    cv2.imshow('Attention Monitor', frame)
+                    if cv2.waitKey(1) & 0xFF == ord('q'): break
+                        
+        except KeyboardInterrupt:
+            print("\nInterrupted by user")
+        finally:
+            self.cleanup()
+
+    def cleanup(self):
+        """Clean up resources and print final summary."""
+        if self.cap is not None:
+            self.cap.release()
+        cv2.destroyAllWindows()
+        
+        # NEW: Final Session Summary Generation
+        print("\n==================================================")
+        print("              FINAL SESSION SUMMARY               ")
+        print("==================================================")
+        print(f"Total frames processed:  {self.frame_count}")
+        print(f"Frames with person:      {self.person_detected_count}")
+        
+        if len(self.session_scores) > 0:
+            avg_score = sum(self.session_scores) / len(self.session_scores)
+            total_scored_frames = len(self.session_scores)
+            
+            print(f"\n[ Overall Performance ]")
+            print(f"Average Attention Score: {avg_score * 100:.1f}%")
+            
+            print(f"\n[ Time Breakdown ]")
+            for status, count in self.status_counts.items():
+                percentage = (count / total_scored_frames) * 100
+                print(f"{status.ljust(20)}: {percentage:>5.1f}%  ({count} frames)")
+        else:
+            print("\n[!] No valid attention data was collected during this session.")
+        
+        print("==================================================\n")
 
 
-class GazeEstimator:
-    """Pluggable gaze model wrapper.
+def main():
+    monitor = AttentionMonitor(
+        camera_id=0,
+        display=True,
+        head_pose_weight=0.6,
+        gaze_weight=0.4,
+        ema_alpha=0.3
+    )
+    monitor.run()
 
-    Replace `estimate` with L2CS-Net inference logic.
-    """
-
-    def estimate(self, face_roi_bgr: np.ndarray, head_pose: HeadPose) -> Optional[np.ndarray]:
-        _ = face_roi_bgr, head_pose
-        return None
-
-
-class AttentionScorer:
-    """Weighted instantaneous score + EMA smoothing."""
-
-    def __init__(self, alpha: float = 0.2, w_head: float = 0.6, w_gaze: float = 0.4):
-        self.alpha = alpha
-        self.w_head = w_head
-        self.w_gaze = w_gaze
-        self.ema_score = 0.0
-
-    @staticmethod
-    def _head_score(pose: HeadPose) -> float:
-        yaw_penalty = min(abs(pose.yaw) / 45.0, 1.0)
-        pitch_penalty = min(abs(pose.pitch) / 35.0, 1.0)
-        return max(0.0, 1.0 - 0.7 * yaw_penalty - 0.3 * pitch_penalty)
-
-    @staticmethod
-    def _gaze_score(gaze_vec: Optional[np.ndarray]) -> float:
-        if gaze_vec is None:
-            return 0.0
-        gx, gy, gz = gaze_vec
-        off_axis = min((abs(gx) + abs(gy)) / max(abs(gz), 1e-6), 1.0)
-        return max(0.0, 1.0 - off_axis)
-
-    def update(self, pose: HeadPose, gaze_vec: Optional[np.ndarray]) -> float:
-        instant = self.w_head * self._head_score(pose) + self.w_gaze * self._gaze_score(gaze_vec)
-        self.ema_score = self.alpha * instant + (1 - self.alpha) * self.ema_score
-        return self.ema_score
-
-
-def draw_overlay(frame: np.ndarray, pose: HeadPose, score: float):
-    cv2.putText(frame, f"Yaw: {pose.yaw: .1f}", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-    cv2.putText(frame, f"Pitch: {pose.pitch: .1f}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-    cv2.putText(frame, f"Roll: {pose.roll: .1f}", (10, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-    cv2.putText(frame, f"Attention EMA: {score:.2f}", (10, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-
-def run(camera_index: int):
-    cap = cv2.VideoCapture(camera_index)
-    if not cap.isOpened():
-        raise RuntimeError(f"Could not open camera index {camera_index}")
-
-    gatekeeper = Gatekeeper()
-    head_pose_estimator = HeadPoseEstimator()
-    gaze_estimator = GazeEstimator()
-    scorer = AttentionScorer(alpha=0.2)
-
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-
-        roi = gatekeeper.detect_person_roi(frame)
-        if roi is None:
-            cv2.putText(frame, "No person detected", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            cv2.imshow("Attention Monitor", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
-            continue
-
-        x1, y1, x2, y2 = roi
-        face_roi = frame[y1:y2, x1:x2]
-
-        pose = head_pose_estimator.estimate(face_roi)
-        if pose is not None:
-            gaze_vec = gaze_estimator.estimate(face_roi, pose)
-            score = scorer.update(pose, gaze_vec)
-            draw_overlay(frame, pose, score)
-
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-        cv2.imshow("Attention Monitor", frame)
-
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="CPU-friendly real-time attention monitor")
-    parser.add_argument("--camera", type=int, default=0, help="Camera index for OpenCV VideoCapture")
-    return parser.parse_args()
-
-
-if __name__ == "__main__":
-    args = parse_args()
-    run(args.camera)
+if __name__ == '__main__':
+    main()
