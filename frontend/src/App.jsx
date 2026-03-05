@@ -8,7 +8,6 @@ import { SearchBar } from './components/SearchBar';
 import { AlertPanel } from './components/AlertPanel';
 import { UserDetailModal } from './components/UserDetailModal';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
-import { ThemeToggle } from './components/ThemeToggle';
 import { Users, Target, TrendingUp, Clock } from 'lucide-react';
 
 function AppContent() {
@@ -178,7 +177,6 @@ function AppContent() {
             </h1>
             <p className="text-gray-400 text-sm">Real-time Attention Monitoring System</p>
           </div>
-          <ThemeToggle />
         </header>
 
         <AlertPanel alerts={alerts} onDismiss={(id) => setAlerts(alerts.filter((a) => a.id !== id))} />

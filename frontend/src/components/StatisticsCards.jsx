@@ -6,10 +6,29 @@ export function StatisticsCards({ stats }) {
       {stats.map((stat, idx) => (
         <div
           key={idx}
-          className="bg-gray-800 border border-gray-700 rounded-lg p-4 hover:border-blue-500 transition-all duration-300 hover:shadow-lg hover:shadow-blue-500/20"
+          className="
+          bg-[#020617]
+          border border-white/10
+          rounded-xl
+          p-4
+          transition-all duration-300
+          hover:border-blue-400/40
+        "
         >
           <div className="flex items-start justify-between mb-3">
-            <div className={`p-2 rounded ${stat.color}`}>{stat.icon}</div>
+
+            {/* ICON */}
+            <div
+              className="
+              p-2 rounded-lg
+              bg-blue-500/10
+              border border-blue-400/20
+            "
+            >
+              {stat.icon}
+            </div>
+
+            {/* TREND */}
             {stat.trend !== undefined && (
               <div
                 className={`flex items-center gap-1 text-sm font-semibold ${
@@ -21,8 +40,16 @@ export function StatisticsCards({ stats }) {
               </div>
             )}
           </div>
-          <p className="text-gray-400 text-sm mb-2">{stat.label}</p>
-          <p className="text-2xl font-bold text-white">{stat.value}</p>
+
+          {/* LABEL */}
+          <p className="text-gray-400 text-sm mb-2">
+            {stat.label}
+          </p>
+
+          {/* VALUE */}
+          <p className="text-2xl font-bold text-white">
+            {stat.value}
+          </p>
         </div>
       ))}
     </div>
