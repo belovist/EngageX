@@ -1,71 +1,98 @@
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 interface AttentionChartProps {
   data: Array<{ time: string; score: number }>;
 }
 
 export function AttentionChart({ data }: AttentionChartProps) {
+  const avgScore = Math.round(data.reduce((sum, d) => sum + d.score, 0) / data.length);
+  const maxScore = Math.max(...data.map((d) => d.score));
+  const minScore = Math.min(...data.map((d) => d.score));
+
   return (
-    <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-6">
-      <div className="mb-4">
-        <h2 className="text-sm font-mono text-[#888] uppercase tracking-wider">
-          Aggregate Attention Score — Live Feed
-        </h2>
+    <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 animate-fadeIn">
+      <div className="mb-6">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-white mb-2">Attention Score Trend</h2>
+            <p className="text-sm text-gray-400">Live aggregate attention monitoring</p>
+          </div>
+          <div className="flex gap-4">
+            <div className="text-right">
+              <p className="text-xs text-gray-400">Average</p>
+              <p className="text-2xl font-bold text-blue-400">{avgScore}%</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-gray-400">Peak</p>
+              <p className="text-2xl font-bold text-green-400">{maxScore}%</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-gray-400">Low</p>
+              <p className="text-2xl font-bold text-red-400">{minScore}%</p>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div className="h-[400px]">
+      <div className="h-[400px] bg-gray-900/50 rounded-lg p-4">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
+          <LineChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
+            <defs>
+              <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
+                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.2}/>
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(100, 116, 139, 0.2)" />
             <XAxis
               dataKey="time"
-              stroke="#666"
-              style={{ fontSize: '12px', fontFamily: 'monospace' }}
-              tick={{ fill: '#888' }}
+              stroke="#888"
+              style={{ fontSize: '12px' }}
+              tick={{ fill: '#999' }}
             />
             <YAxis
               domain={[0, 100]}
-              stroke="#666"
-              style={{ fontSize: '12px', fontFamily: 'monospace' }}
-              tick={{ fill: '#888' }}
+              stroke="#888"
+              style={{ fontSize: '12px' }}
+              tick={{ fill: '#999' }}
               label={{
-                value: 'Attention Score (%)',
+                value: 'Score (%)',
                 angle: -90,
                 position: 'insideLeft',
-                style: { fill: '#888', fontSize: '12px', fontFamily: 'monospace' },
+                style: { fill: '#999', fontSize: '12px' },
               }}
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: '#0f0f0f',
-                border: '1px solid #2a2a2a',
-                borderRadius: '4px',
-                fontFamily: 'monospace',
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                border: '1px solid rgba(59, 130, 246, 0.5)',
+                borderRadius: '8px',
               }}
-              labelStyle={{ color: '#00ff88' }}
-              itemStyle={{ color: '#fff' }}
+              labelStyle={{ color: '#3b82f6' }}
+              itemStyle={{ color: '#e0f2fe' }}
+              cursor={{ stroke: 'rgba(59, 130, 246, 0.5)' }}
             />
             <Line
-              type="stepAfter"
+              type="monotone"
               dataKey="score"
-              stroke="#00ff88"
+              stroke="#3b82f6"
               strokeWidth={3}
-              dot={{ fill: '#00ff88', r: 4 }}
-              activeDot={{ r: 6, fill: '#00ff88' }}
+              dot={{ fill: '#3b82f6', r: 4 }}
+              activeDot={{ r: 6, fill: '#60a5fa' }}
+              isAnimationActive={true}
             />
           </LineChart>
         </ResponsiveContainer>
       </div>
 
-      <div className="mt-4 flex items-center justify-center gap-6 text-xs font-mono">
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-[#00ff88] rounded-full"></div>
-          <span className="text-[#888]">High Focus (70-100%)</span>
+      <div className="mt-4 flex items-center justify-between text-xs text-gray-400">
+        <div className="flex gap-4">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-blue-400 rounded-full"></div>
+            <span>Current Score</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-[#ff3333] rounded-full"></div>
-          <span className="text-[#888]">Low Focus (0-69%)</span>
-        </div>
+        <span>Last updated: Just now</span>
       </div>
     </div>
   );
