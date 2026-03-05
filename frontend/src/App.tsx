@@ -55,22 +55,7 @@ function AppContent() {
     { id: 12, name: 'User 12', status: 'Active', score: 79 },
   ]);
 
-  const [alerts, setAlerts] = useState<Alert[]>([
-    {
-      id: '1',
-      type: 'critical',
-      title: 'Low Attention Detected',
-      message: 'User 10 has attention score below 40%',
-      timestamp: 'Just now',
-    },
-    {
-      id: '2',
-      type: 'warning',
-      title: 'Declining Performance',
-      message: 'User 03 attention score trending downward',
-      timestamp: '2 mins ago',
-    },
-  ]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
 
   const [activeView, setActiveView] = useState('dashboard');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -162,7 +147,13 @@ function AppContent() {
             message: `Session average has dropped to ${currentAverage}%`,
             timestamp: 'Just now',
           };
-          setAlerts((prev) => [newAlert, ...prev].slice(0, 5));
+          // Replace previous alerts with new one
+          setAlerts([newAlert]);
+
+          // Auto-dismiss after 8 seconds
+          setTimeout(() => {
+            setAlerts((prev) => prev.filter((a) => a.id !== newAlert.id));
+          }, 8000);
         }
 
         // Alert if critical (below 60%)
@@ -174,7 +165,13 @@ function AppContent() {
             message: `Session average is critically low at ${currentAverage}%`,
             timestamp: 'Just now',
           };
-          setAlerts((prev) => [newAlert, ...prev].slice(0, 5));
+          // Replace previous alerts with new one
+          setAlerts([newAlert]);
+
+          // Auto-dismiss after 10 seconds
+          setTimeout(() => {
+            setAlerts((prev) => prev.filter((a) => a.id !== newAlert.id));
+          }, 10000);
         }
 
         previousAverage = currentAverage;
