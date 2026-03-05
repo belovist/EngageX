@@ -6,13 +6,30 @@ export function TrendIndicator({ value, label }) {
 
   return (
     <div
-      className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold ${
-        isPositive ? 'bg-green-900/30 text-green-400' : isNeutral ? 'bg-gray-700/30 text-gray-400' : 'bg-red-900/30 text-red-400'
-      }`}
+      className="
+      flex items-center gap-1
+      px-2 py-1
+      rounded-md
+      text-xs font-semibold
+      bg-[#020617]
+      border border-white/10
+      "
     >
-      {isPositive ? <TrendingUp size={14} /> : isNeutral ? <Minus size={14} /> : <TrendingDown size={14} />}
-      <span>{Math.abs(value)}%</span>
-      {label && <span className="text-gray-400">({label})</span>}
+      {isPositive ? (
+        <TrendingUp size={14} className="text-blue-400" />
+      ) : isNeutral ? (
+        <Minus size={14} className="text-gray-400" />
+      ) : (
+        <TrendingDown size={14} className="text-purple-400" />
+      )}
+
+      <span className="text-white">{Math.abs(value)}%</span>
+
+      {label && (
+        <span className="text-gray-400">
+          ({label})
+        </span>
+      )}
     </div>
   );
 }

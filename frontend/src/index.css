@@ -118,3 +118,7 @@
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+html, body, #root {
+  height: 100%;
+  background-color: #020617;
+}
