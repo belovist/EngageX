@@ -1,4 +1,4 @@
-import { Menu, X, BarChart3, Users, Settings, Download, Bell } from "lucide-react";
+import { Menu, X, BarChart3, Users, Download } from "lucide-react";
 import { useState } from "react";
 
 export function Sidebar({ activeView, onViewChange }) {
@@ -7,9 +7,7 @@ export function Sidebar({ activeView, onViewChange }) {
   const menuItems = [
     { id: "dashboard", label: "Dashboard", icon: BarChart3 },
     { id: "users", label: "User Analytics", icon: Users },
-    { id: "alerts", label: "Alerts", icon: Bell },
     { id: "export", label: "Export Data", icon: Download },
-    { id: "settings", label: "Settings", icon: Settings },
   ];
 
   return (

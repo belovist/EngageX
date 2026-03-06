@@ -4,7 +4,6 @@ import { UserGrid } from './components/UserGrid';
 import { SessionHeader } from './components/SessionHeader';
 import { Sidebar } from './components/Sidebar';
 import { StatisticsCards } from './components/StatisticsCards';
-import { AlertPanel } from './components/AlertPanel';
 import { UserDetailModal } from './components/UserDetailModal';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { Users, Target, TrendingUp, Clock } from 'lucide-react';
@@ -38,7 +37,6 @@ function AppContent() {
     { id: 12, name: 'User 12', status: 'Active', score: 79 },
   ]);
 
-  const [alerts, setAlerts] = useState([]);
   const [activeView, setActiveView] = useState('dashboard');
   const [selectedUser, setSelectedUser] = useState(null);
   const { theme } = useTheme();
@@ -110,34 +108,6 @@ function AppContent() {
 
         const currentAverage = Math.round(updated.reduce((sum, u) => sum + u.score, 0) / updated.length);
 
-        if (currentAverage < 70 && previousAverage >= 70) {
-          const newAlert = {
-            id: Date.now().toString(),
-            type: 'warning',
-            title: 'Average Attention Score Declining',
-            message: `Session average has dropped to ${currentAverage}%`,
-            timestamp: 'Just now',
-          };
-          setAlerts([newAlert]);
-          setTimeout(() => {
-            setAlerts((prevAlerts) => prevAlerts.filter((a) => a.id !== newAlert.id));
-          }, 8000);
-        }
-
-        if (currentAverage < 60 && previousAverage >= 60) {
-          const newAlert = {
-            id: Date.now().toString(),
-            type: 'critical',
-            title: 'Critical: Low Attention Session',
-            message: `Session average is critically low at ${currentAverage}%`,
-            timestamp: 'Just now',
-          };
-          setAlerts([newAlert]);
-          setTimeout(() => {
-            setAlerts((prevAlerts) => prevAlerts.filter((a) => a.id !== newAlert.id));
-          }, 10000);
-        }
-
         previousAverage = currentAverage;
         return updated;
       });
@@ -175,8 +145,6 @@ function AppContent() {
           </div>
         </header>
 
-        <AlertPanel alerts={alerts} onDismiss={(id) => setAlerts(alerts.filter((a) => a.id !== id))} />
-
         {activeView === 'dashboard' && (
           <>
             <StatisticsCards stats={stats} />
@@ -201,17 +169,6 @@ function AppContent() {
           </>
         )}
 
-        {activeView === 'alerts' && (
-          <div className="bg-gray-800 border border-gray-700 rounded-lg p-6">
-            <h2 className="text-2xl font-bold mb-6">System Alerts</h2>
-            {alerts.length === 0 ? (
-              <p className="text-gray-400">No active alerts</p>
-            ) : (
-              <AlertPanel alerts={alerts} onDismiss={(id) => setAlerts(alerts.filter((a) => a.id !== id))} />
-            )}
-          </div>
-        )}
-
         {activeView === 'export' && (
           <div className="bg-gray-800 border border-gray-700 rounded-lg p-6">
             <h2 className="text-2xl font-bold mb-6">Export Data</h2>
@@ -229,26 +186,6 @@ function AppContent() {
                   <p className="text-sm text-gray-200">{option.desc}</p>
                 </button>
               ))}
-            </div>
-          </div>
-        )}
-
-        {activeView === 'settings' && (
-          <div className="bg-gray-800 border border-gray-700 rounded-lg p-6">
-            <h2 className="text-2xl font-bold mb-6">Settings</h2>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-gray-300">Enable email notifications</span>
-                <input type="checkbox" className="w-5 h-5" defaultChecked />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-gray-300">Real-time alerts</span>
-                <input type="checkbox" className="w-5 h-5" defaultChecked />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-gray-300">Auto-export data</span>
-                <input type="checkbox" className="w-5 h-5" />
-              </div>
             </div>
           </div>
         )}
