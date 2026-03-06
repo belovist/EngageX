@@ -4,7 +4,6 @@ import { UserGrid } from './components/UserGrid';
 import { SessionHeader } from './components/SessionHeader';
 import { Sidebar } from './components/Sidebar';
 import { StatisticsCards } from './components/StatisticsCards';
-import { SearchBar } from './components/SearchBar';
 import { AlertPanel } from './components/AlertPanel';
 import { UserDetailModal } from './components/UserDetailModal';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
@@ -42,7 +41,6 @@ function AppContent() {
   const [alerts, setAlerts] = useState([]);
   const [activeView, setActiveView] = useState('dashboard');
   const [selectedUser, setSelectedUser] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
   const { theme } = useTheme();
 
   const sessionData = {
@@ -56,7 +54,6 @@ function AppContent() {
     {
       label: 'Total Users',
       value: users.length,
-      trend: 5,
       icon: <Users size={20} className="text-blue-400" />,
       color: 'bg-blue-900/30',
     },
@@ -77,7 +74,6 @@ function AppContent() {
     {
       label: 'Session Duration',
       value: sessionData.duration,
-      trend: 0,
       icon: <Clock size={20} className="text-purple-400" />,
       color: 'bg-purple-900/30',
     },
@@ -180,10 +176,6 @@ function AppContent() {
         </header>
 
         <AlertPanel alerts={alerts} onDismiss={(id) => setAlerts(alerts.filter((a) => a.id !== id))} />
-
-        <div className="mb-6">
-          <SearchBar onSearch={setSearchQuery} placeholder="Search users, sessions, or data..." />
-        </div>
 
         {activeView === 'dashboard' && (
           <>
