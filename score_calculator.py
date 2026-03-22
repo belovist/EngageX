@@ -1,9 +1,31 @@
 """
 Stage IV: Attentiveness Score Calculation
 Fuses head pose and gaze data into a single metric with EMA smoothing.
+
+Statistical mapping (backend):
+- Penalty per angle: score = max(0, 1.0 - (abs(angle) / threshold))
+- pose_score: yaw/pitch threshold 30°, roll 15° → 0.4*yaw + 0.4*pitch + 0.2*roll
+- gaze_score: yaw/pitch threshold 30° → 0.5*yaw + 0.5*pitch
+- S_t = 0.6 * pose_score + 0.4 * gaze_score
+- EMA: final = 0.3 * S_t + 0.7 * previous_final
+- Percentage: round(final * 100)
+- Labels: >=80 Highly, >=50 Moderately, <50 Distracted
 """
 
+from typing import Optional, Dict, Any
+
 import numpy as np
+
+
+def classify_attention_percent(percent: Optional[int]) -> str:
+    """Map 0–100 percentage to a 3-tier attention label."""
+    if percent is None:
+        return "No Data"
+    if percent >= 80:
+        return "Highly Attentive"
+    if percent >= 50:
+        return "Moderately Attentive"
+    return "Distracted"
 
 
 class AttentivenessScoreCalculator:
@@ -183,6 +205,54 @@ class AttentivenessScoreCalculator:
         smoothed_score = self.apply_ema_smoothing(instantaneous_score)
         
         return instantaneous_score, smoothed_score
+
+    @staticmethod
+    def score_to_percent(score: Optional[float]) -> Optional[int]:
+        """Convert 0..1 score to integer percentage for chart / API."""
+        if score is None:
+            return None
+        return int(round(float(score) * 100))
+
+    def calculate_with_metrics(
+        self,
+        head_pose_angles=None,
+        gaze_vector=None,
+        emotion=None,
+    ) -> Dict[str, Any]:
+        """
+        Full pipeline output: raw scores, EMA-smoothed score, percentage, and label.
+
+        Returns:
+            dict with keys:
+              instantaneous_score, smoothed_score (0..1 or None),
+              instantaneous_percent, attention_percent (0..100 or None),
+              label (str),
+              pose_score, gaze_score (0..1 or None) if computable
+        """
+        pose_score = None
+        gaze_score = None
+        if head_pose_angles is not None:
+            pose_score = self.calculate_head_pose_score(head_pose_angles)
+        if gaze_vector is not None:
+            gaze_score = self.calculate_gaze_score(gaze_vector)
+
+        instantaneous_score, smoothed_score = self.calculate(
+            head_pose_angles, gaze_vector, emotion
+        )
+
+        inst_pct = self.score_to_percent(instantaneous_score)
+        attn_pct = self.score_to_percent(smoothed_score)
+        label = classify_attention_percent(attn_pct)
+
+        return {
+            "instantaneous_score": instantaneous_score,
+            "smoothed_score": smoothed_score,
+            "instantaneous_percent": inst_pct,
+            "attention_percent": attn_pct,
+            "label": label,
+            "pose_score": pose_score,
+            "gaze_score": gaze_score,
+        }
     
     def reset(self):
         """Reset EMA state."""

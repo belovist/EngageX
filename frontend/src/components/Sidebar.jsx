@@ -6,7 +6,7 @@ export function Sidebar({ activeView, onViewChange }) {
 
   const menuItems = [
     { id: "dashboard", label: "Dashboard", icon: BarChart3 },
-    { id: "users", label: "User Analytics", icon: Users },
+    { id: "monitor", label: "Live Monitor", icon: Users },
     { id: "export", label: "Export Data", icon: Download },
   ];
 

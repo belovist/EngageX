@@ -26,6 +26,11 @@ env/
 ENV/
 .venv
 
+# Node / frontend
+node_modules/
+frontend/build/
+frontend/dist/
+
 # IDE
 .vscode/
 .idea/
@@ -50,7 +55,6 @@ ENV/
 *.jpeg
 *.png
 *.csv
-*.json
 *.log
 
 # OS
@@ -62,3 +66,6 @@ desktop.ini
 output/
 results/
 logs/
+
+# Live metrics (written by metrics_writer.py / server.py)
+attention_metrics.json

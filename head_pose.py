@@ -55,6 +55,10 @@ class HeadPoseEstimator:
         61,  # Left mouth corner
         291  # Right mouth corner
     ]
+
+    # Inter-eye landmarks for dynamic 3D model scaling (depth / scale alignment)
+    LM_LEFT_EYE = 33   # left eye outer corner (canonical for inter-eye distance)
+    LM_RIGHT_EYE = 263  # right eye outer corner
     
     def __init__(self):
         """
@@ -139,24 +143,52 @@ class HeadPoseEstimator:
     def estimate_pose(self, frame):
         """
         Estimate head pose angles (yaw, pitch, roll) using cv2.solvePnP.
-        
+
+        Dynamic 3D scaling (depth alignment):
+        1) Read MediaPipe landmarks 33 and 263 (left / right eye).
+        2) 2D Euclidean distance between those points.
+        3) scale_factor = distance_2d / 450.0
+        4) face_3d_scaled = face_3d_model * scale_factor
+        5) Pass face_3d_scaled into cv2.solvePnP with the 6 PnP points.
+
         Args:
             frame: Input BGR frame (cropped face ROI)
-            
+
         Returns:
             tuple: (success: bool, result: dict or None)
                    result contains 'yaw', 'pitch', 'roll' (degrees) and 'pose_score' (0-1)
         """
-        # Extract 2D landmarks
-        landmarks_2d = self.get_landmarks(frame)
-        
-        if landmarks_2d is None or len(landmarks_2d) < 6:
+        # Single Face Mesh pass: avoids duplicate inference and keeps scale + PnP consistent
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.face_mesh.process(rgb_frame)
+
+        if not results.multi_face_landmarks:
             return False, None
-        
+
+        face_landmarks = results.multi_face_landmarks[0]
         h, w = frame.shape[:2]
-        
+
+        # --- Task 1: Dynamic 3D model scaling from inter-eye distance (LM 33 & 263) ---
+        lm_left = face_landmarks.landmark[self.LM_LEFT_EYE]
+        lm_right = face_landmarks.landmark[self.LM_RIGHT_EYE]
+        left_eye_px = np.array([lm_left.x * w, lm_left.y * h], dtype=np.float32)
+        right_eye_px = np.array([lm_right.x * w, lm_right.y * h], dtype=np.float32)
+        eye_distance_2d = float(np.linalg.norm(left_eye_px - right_eye_px))
+
+        if eye_distance_2d < 10.0:  # Sanity check (too small / invalid)
+            return False, None
+
+        scale_factor = eye_distance_2d / 450.0
+        face_3d_scaled = self.FACE_3D_MODEL * scale_factor
+
+        # --- 6-point 2D correspondences for PnP (same order as FACE_3D_MODEL rows) ---
+        landmark_points = []
+        for idx in self.LANDMARK_INDICES:
+            lm = face_landmarks.landmark[idx]
+            landmark_points.append([float(lm.x * w), float(lm.y * h)])
+        landmarks_2d = np.array(landmark_points, dtype=np.float32)
+
         # Camera intrinsic parameters (approximate)
-        # Focal length approximated as image width
         focal_length = float(w)
         center = (w / 2.0, h / 2.0)
         camera_matrix = np.array([
@@ -164,19 +196,8 @@ class HeadPoseEstimator:
             [0.0, focal_length, center[1]],
             [0.0, 0.0, 1.0]
         ], dtype=np.float64)
-        
-        # Distortion coefficients (assuming no distortion)
+
         dist_coeffs = np.zeros((4, 1), dtype=np.float64)
-        
-        # Scale 3D model points to match image scale
-        # Use inter-eye distance as reference
-        eye_distance = np.linalg.norm(landmarks_2d[2] - landmarks_2d[3])
-        if eye_distance < 10.0:  # Sanity check
-            return False, None
-        
-        # Scale factor: 450.0 is approximate inter-eye distance in 3D model
-        scale_factor = eye_distance / 450.0
-        face_3d_scaled = self.FACE_3D_MODEL * scale_factor
         
         # Solve PnP to get rotation and translation vectors
         success, rotation_vector, translation_vector = cv2.solvePnP(

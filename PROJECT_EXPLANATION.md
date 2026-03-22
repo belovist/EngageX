@@ -411,7 +411,7 @@ Exponential Moving Average gives more weight to recent values while still consid
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ FRAME 1: Webcam captures 640×480 BGR image                      │
+│ FRAME 1: Webcam captures 640×480 BGR image                    │
 └─────────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -456,8 +456,8 @@ Exponential Moving Average gives more weight to recent values while still consid
                             ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │ STAGE I: YOLOv8 Nano                                            │
-│ - Process: No person detected (Person_Count = 0)                │
-│ - Action: RETURN EARLY (skip Stages II, III, IV)                │
+│ - Process: No person detected (Person_Count = 0)               │
+│ - Action: RETURN EARLY (skip Stages II, III, IV)               │
 │ - CPU Saved: ~35-90ms per frame                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
