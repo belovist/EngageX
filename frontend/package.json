@@ -1,6 +1,7 @@
 {
   "name": "frontend",
   "version": "1.0.0",
+  "type": "module",
   "description": "This is a code bundle for Dark Mode Admin Dashboard. The original project is available at https://www.figma.com/design/jLhWitNaDjM4DN8h5DCExU/Dark-Mode-Admin-Dashboard.",
   "main": "postcss.config.js",
   "scripts": {
@@ -21,7 +22,11 @@
   "devDependencies": {
     "@vitejs/plugin-react-swc": "^4.2.3",
     "autoprefixer": "^10.4.27",
+    "electron": "^40.8.0",
+    "electron-builder": "^26.8.1",
     "postcss": "^8.5.8",
-    "tailwindcss": "^3.4.4"
+    "tailwindcss": "^3.4.4",
+    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-pwa": "^1.2.0"
   }
 }

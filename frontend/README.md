@@ -1,11 +1,32 @@
+# Frontend Dashboard
 
-  # Dark Mode Admin Dashboard
+## Development
 
-  This is a code bundle for Dark Mode Admin Dashboard. The original project is available at https://www.figma.com/design/jLhWitNaDjM4DN8h5DCExU/Dark-Mode-Admin-Dashboard.
+```bash
+npm install
+npm run dev
+```
 
-  ## Running the code
+Open `http://127.0.0.1:3000`.
 
-  Run `npm i` to install the dependencies.
+By default the dev server proxies:
 
-  Run `npm run dev` to start the development server.
-  
+- `/api` -> `http://127.0.0.1:8000`
+- `/video_feed` -> `http://127.0.0.1:8000`
+- `/health` -> `http://127.0.0.1:8000`
+
+## Production Build
+
+```bash
+npm run build
+```
+
+## Environment
+
+Leave `VITE_API_URL` unset to use the local dev proxy.
+
+Set it only if the backend is hosted elsewhere:
+
+```bash
+VITE_API_URL=http://127.0.0.1:8000
+```

@@ -6,24 +6,22 @@ export function StatisticsCards({ stats }) {
       {stats.map((stat, idx) => (
         <div
           key={idx}
-          className="
-          bg-[#020617]
-          border border-white/10
+          className={`
           rounded-xl
           p-4
           transition-all duration-300
           hover:border-blue-400/40
-        "
+          ${stat.cardClass ?? "bg-[#020617] border border-white/10"}
+        `}
         >
           <div className="flex items-start justify-between mb-3">
 
             {/* ICON */}
             <div
-              className="
-              p-2 rounded-lg
-              bg-blue-500/10
-              border border-blue-400/20
-            "
+              className={`
+              p-2 rounded-lg border
+              ${stat.iconShellClass ?? "bg-blue-500/10 border-blue-400/20"}
+            `}
             >
               {stat.icon}
             </div>
@@ -47,7 +45,7 @@ export function StatisticsCards({ stats }) {
           </p>
 
           {/* VALUE */}
-          <p className="text-2xl font-bold text-white">
+          <p className={`text-2xl font-bold ${stat.valueClass ?? 'text-white'}`}>
             {stat.value}
           </p>
         </div>

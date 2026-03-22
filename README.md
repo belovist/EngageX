@@ -1,234 +1,128 @@
 # Real-Time Attention Monitoring System
 
-A lightweight, CPU-optimized system for real-time attention monitoring using YOLOv8 Nano, MediaPipe Face Mesh, and L2CS-Net for gaze tracking.
+A lightweight, CPU-oriented attention monitoring system built with YOLOv8 Nano, MediaPipe Face Mesh, L2CS-Net gaze estimation, FastAPI, and a live React dashboard.
 
-## Architecture Overview
+## What It Does
 
-The system follows a linear pipeline architecture:
+Pipeline:
 
+```text
+Input Frame -> YOLO Gatekeeper -> Head Pose -> Gaze Tracking -> Score Calculation
 ```
-Input Frame → YOLO Gatekeeper → Head Pose → Gaze Tracking → Score Calculation
+
+- Stage I: person detection and ROI cropping
+- Stage II: head pose estimation
+- Stage III: gaze estimation when the ONNX model is available
+- Stage IV: smoothed attention scoring
+- Optional FastAPI server for live JSON, SSE, and MJPEG video
+- React dashboard connected to the backend in real time
+
+## Run It
+
+### 1. Install Python dependencies
+
+From the project root:
+
+```bash
+pip install -r requirements.txt
 ```
 
-### Components
+### 2. Start the backend
 
-1. **Stage I: Gatekeeper (YOLOv8 Nano)**
-   - Person detection and presence verification
-   - ROI cropping to focus on the user's face
+```bash
+python -m uvicorn server:app --host 127.0.0.1 --port 8000
+```
 
-2. **Stage II: Head Pose Estimation (MediaPipe Face Mesh)**
-   - Calculates yaw, pitch, and roll angles using Perspective-n-Point (PnP)
-   - Determines coarse visual focus of attention
+Backend endpoints:
 
-3. **Stage III: Gaze Tracking (L2CS-Net)**
-   - Fine-grained attention detection
-   - Distinguishes between facing screen vs. looking at camera
-   - Outputs gaze vectors
+- `GET /health`
+- `GET /api/metrics`
+- `GET /api/attention/stream`
+- `GET /video_feed`
 
-4. **Stage IV: Attentiveness Score**
-   - Fuses head pose and gaze data into a single metric
-   - Applies Exponential Moving Average (EMA) smoothing to prevent jittering
+The backend also writes `attention_metrics.json` on each frame.
 
-## Features
+### 3. Start the frontend
 
-- ✅ **Lightweight**: Optimized for CPU-only execution
-- ✅ **Real-time**: Processes video feed frame-by-frame
-- ✅ **Local Execution**: No cloud dependencies
-- ✅ **YOLO Nano**: Fastest YOLO variant for person detection
-- ✅ **MediaPipe**: Extremely fast facial landmark detection
-- ✅ **L2CS-Net**: Calibration-free gaze estimation
+In a second terminal:
 
-## Requirements
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-- Python 3.8+
-- Webcam/Camera
-- CPU (GPU optional, not required)
+Open `http://127.0.0.1:3000`.
 
-## Installation
+The Vite dev server proxies `/api`, `/video_feed`, and `/health` to `http://127.0.0.1:8000`.
 
-1. **Clone or download this repository**
+## Other Modes
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### JSON-only mode
 
-3. **Download YOLOv8 Nano model** (automatically downloaded on first run):
-   - The model will be automatically downloaded by Ultralytics when you first run the system
+If you only want the metrics file:
 
-4. **Optional: Download L2CS-Net pretrained weights**:
-   - If you have pretrained L2CS-Net weights, place them in the project directory
-   - The system will work without pretrained weights (uses random initialization)
+```bash
+python metrics_writer.py
+```
 
-## Usage
+### OpenCV window mode
 
-### Basic Usage
-
-Run the main monitoring script:
+If you want the local overlay window instead of the dashboard:
 
 ```bash
 python attention_monitor.py
 ```
 
-This will:
-- Open your default webcam (camera 0)
-- Display the video feed with overlays
-- Show real-time attentiveness scores
-- Press 'q' to quit
+Press `q` to quit.
 
-### Programmatic Usage
+## Optional Environment Variables
 
-```python
-from attention_monitor import AttentionMonitor
+- `CAMERA_ID=0`
+- `GAZE_MODEL_PATH=l2cs_net.onnx`
+- `ATTENTION_METRICS_PATH=attention_metrics.json`
 
-# Initialize monitor
-monitor = AttentionMonitor(
-    camera_id=0,              # Webcam device ID
-    display=True,              # Show video feed
-    head_pose_weight=0.4,     # Weight for head pose in score
-    gaze_weight=0.6,          # Weight for gaze in score
-    ema_alpha=0.3             # EMA smoothing factor (0-1)
-)
+If `GAZE_MODEL_PATH` is missing, the system still runs and falls back to head-pose-only scoring.
 
-# Run monitoring
-monitor.run()
-```
+## Frontend Notes
 
-### Custom Configuration
-
-```python
-from attention_monitor import AttentionMonitor
-
-monitor = AttentionMonitor(
-    camera_id=0,
-    yolo_model='yolov8n.pt',      # YOLOv8 Nano model path
-    gaze_model_path='l2cs_weights.pth',  # Optional L2CS-Net weights
-    head_pose_weight=0.5,         # Adjust weights as needed
-    gaze_weight=0.5,
-    ema_alpha=0.2,                 # Lower = more smoothing
-    display=True
-)
-monitor.run()
-```
-
-### Processing Single Frames
-
-```python
-import cv2
-from attention_monitor import AttentionMonitor
-
-monitor = AttentionMonitor(display=False)
-monitor.initialize_camera()
-
-ret, frame = monitor.cap.read()
-results = monitor.process_frame(frame)
-
-print(f"Attentiveness Score: {results['scores'][1]:.3f}")
-print(f"Head Pose: {results['head_pose_angles']}")
-print(f"Gaze Vector: {results['gaze_vector']}")
-```
-
-## Score Interpretation
-
-The attentiveness score ranges from **0.0 to 1.0**:
-
-- **0.8 - 1.0**: Highly attentive (facing forward, looking at screen)
-- **0.5 - 0.8**: Moderately attentive
-- **0.0 - 0.5**: Distracted (head turned away, not looking at screen)
-
-The score is calculated as:
-```
-Score = w_hp × HeadPose_Score + w_g × Gaze_Score
-```
-
-Where:
-- `w_hp` = head pose weight (default: 0.4)
-- `w_g` = gaze weight (default: 0.6)
-- HeadPose_Score = based on yaw, pitch, roll angles
-- Gaze_Score = based on alignment with target direction
-
-## Project Structure
-
-```
-.
-├── attention_monitor.py    # Main pipeline script
-├── gatekeeper.py           # Stage I: YOLOv8 Nano person detection
-├── head_pose.py            # Stage II: MediaPipe head pose estimation
-├── gaze_tracker.py         # Stage III: L2CS-Net gaze tracking
-├── score_calculator.py     # Stage IV: Score calculation and smoothing
-├── requirements.txt        # Python dependencies
-└── README.md              # This file
-```
-
-## Performance Notes
-
-- **YOLOv8 Nano**: ~10-30ms per frame on CPU
-- **MediaPipe Face Mesh**: ~5-10ms per frame
-- **L2CS-Net**: ~20-50ms per frame on CPU (depending on model size)
-- **Total Pipeline**: ~35-90ms per frame (~11-28 FPS)
-
-For better performance:
-- Reduce input resolution
-- Use GPU if available (set `device='cuda'` in GazeTracker)
-- Adjust EMA alpha for smoother but slower response
+- Live status uses SSE with polling fallback.
+- The webcam panel uses the MJPEG backend stream.
+- Set `VITE_API_URL` only if the backend is not running on localhost:8000.
 
 ## Troubleshooting
 
-### MediaPipe `solutions` module not found
-**Error:** `AttributeError: module 'mediapipe' has no attribute 'solutions'`
+### Uvicorn not found on Windows
 
-**Solution:** The system will automatically fall back to OpenCV-based face detection. However, for better accuracy, you can try:
+Use:
 
-1. **Reinstall MediaPipe:**
-   ```bash
-   pip uninstall mediapipe -y
-   pip install mediapipe==0.10.0
-   ```
-
-2. **Or use the OpenCV fallback** (already implemented):
-   - The system will automatically use OpenCV Haar Cascades if MediaPipe solutions is unavailable
-   - This works but is less accurate than MediaPipe Face Mesh
-
-3. **Verify MediaPipe installation:**
-   ```python
-   python -c "import mediapipe as mp; print(hasattr(mp, 'solutions'))"
-   ```
+```bash
+python -m uvicorn server:app --host 127.0.0.1 --port 8000
+```
 
 ### Camera not opening
-- Check camera permissions
-- Try different `camera_id` values (0, 1, 2, etc.)
-- Ensure no other application is using the camera
 
-### Low FPS
-- Reduce camera resolution in `attention_monitor.py`
-- Use a smaller YOLO model variant
-- Disable display (`display=False`)
+- Check camera permissions.
+- Try another camera index such as `1` or `2`.
+- Make sure another app is not already using the webcam.
 
-### Poor gaze tracking accuracy
-- Ensure good lighting conditions
-- Face should be clearly visible
-- Consider using pretrained L2CS-Net weights
+### Missing ONNX runtime or model
 
-### Person not detected
-- Check lighting conditions
-- Ensure person is in frame
-- Adjust `confidence_threshold` in `Gatekeeper` class
+The app keeps running without the L2CS gaze model. In that case gaze is disabled and attention is computed from head pose only.
 
-## License
+### MediaPipe solutions error
 
-This project is provided as-is for educational and research purposes.
+If you hit a MediaPipe `solutions` import error, use a Python / MediaPipe combination that still supports `mp.solutions.face_mesh` as required by this codebase.
 
-## Acknowledgments
+## Files
 
-- **YOLOv8**: Ultralytics (https://github.com/ultralytics/ultralytics)
-- **MediaPipe**: Google (https://mediapipe.dev/)
-- **L2CS-Net**: Inspired by L2CS-Net architecture for gaze estimation
-
-## Future Improvements
-
-- [ ] Add support for multiple faces
-- [ ] Implement calibration routine for better gaze accuracy
-- [ ] Add emotion detection component (currently set to 0 weight)
-- [ ] Export scores to CSV/log file
-- [ ] Add web interface for remote monitoring
-- [ ] Support for video file input (not just webcam)
+```text
+attention_monitor.py    Main OpenCV pipeline
+metrics_writer.py       JSON-only writer
+server.py               FastAPI + SSE + MJPEG
+gatekeeper.py           YOLO person detection
+head_pose.py            MediaPipe head pose estimation
+gaze_tracker.py         Optional ONNX gaze estimation
+score_calculator.py     Attention score fusion
+frontend/               React dashboard
+```
