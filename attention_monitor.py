@@ -177,13 +177,32 @@ class AttentionMonitor:
 
         self.person_detected_count += 1
 
+        if cropped_frame is not None:
+            print(f"DEBUG - Frame size: {cropped_frame.shape}")
+        else:
+            print("DEBUG - FRAME IS EMPTY! MediaPipe/YOLO failed the crop.")
+        
+        # 1. Run Head Pose Tracking
         head_pose_success, head_pose_angles = self.head_pose_estimator.process(cropped_frame)
         if not head_pose_success:
             head_pose_angles = None
         else:
-            self.head_pose_success_count += 1
+            self.head_pose_success_count += 1      
+        
+        # 2. SAFETY NET: Set default values so Python never crashes
+        gaze_success = False
+        gaze_vector = None
 
-        gaze_success, gaze_vector = self.gaze_tracker.process(cropped_frame)
+        # 3. Run Gaze Tracking (if the cropped frame exists)
+        if cropped_frame is not None:
+            gaze_success, gaze_vector = self.gaze_tracker.process(cropped_frame)
+
+        # 4. Process Gaze Results
+        if not gaze_success:
+            gaze_vector = None
+        else:
+            self.gaze_success_count += 1     
+        
         if not gaze_success:
             gaze_vector = None
         else:
