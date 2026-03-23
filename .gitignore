@@ -41,7 +41,7 @@ frontend/dist/
 # Models and weights
 *.pt
 *.pth
-*.onnx
+
 *.weights
 *.h5
 *.pb
