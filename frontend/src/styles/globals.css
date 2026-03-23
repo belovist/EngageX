@@ -1,0 +1,306 @@
+@custom-variant dark (&:is(.dark *));
+
+/* ------------------------------
+   ROOT THEME (AI Dashboard Theme)
+-------------------------------*/
+
+:root {
+  --font-size: 16px;
+
+  /* Background */
+  --background: #040b1a;
+  --foreground: #e6edf7;
+
+  /* Cards */
+  --card: rgba(255, 255, 255, 0.04);
+  --card-foreground: #e6edf7;
+
+  /* Popovers */
+  --popover: #0b1220;
+  --popover-foreground: #e6edf7;
+
+  /* Primary Accent */
+  --primary: #4f8cff;
+  --primary-foreground: #ffffff;
+
+  /* Secondary Accent */
+  --secondary: #7c5cff;
+  --secondary-foreground: #ffffff;
+
+  /* Muted text */
+  --muted: rgba(255,255,255,0.06);
+  --muted-foreground: #94a3b8;
+
+  /* Accent surfaces */
+  --accent: rgba(79,140,255,0.08);
+  --accent-foreground: #4f8cff;
+
+  /* Alerts */
+  --destructive: #ff4d6d;
+  --destructive-foreground: #ffffff;
+
+  /* Borders */
+  --border: rgba(255,255,255,0.08);
+
+  /* Inputs */
+  --input: rgba(255,255,255,0.06);
+  --input-background: rgba(255,255,255,0.04);
+
+  --switch-background: #1f2937;
+
+  --ring: #4f8cff;
+
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+
+  /* Charts */
+  --chart-1: #4f8cff;
+  --chart-2: #2dd4bf;
+  --chart-3: #7c5cff;
+  --chart-4: #ffb020;
+  --chart-5: #ff4d6d;
+
+  /* Radius */
+  --radius: 0.75rem;
+
+  /* Sidebar */
+  --sidebar: #050b1a;
+  --sidebar-foreground: #e6edf7;
+
+  --sidebar-primary: #4f8cff;
+  --sidebar-primary-foreground: #ffffff;
+
+  --sidebar-accent: rgba(79,140,255,0.12);
+  --sidebar-accent-foreground: #e6edf7;
+
+  --sidebar-border: rgba(255,255,255,0.06);
+  --sidebar-ring: #4f8cff;
+}
+
+
+/* ------------------------------
+   DARK MODE
+-------------------------------*/
+
+.dark {
+  --background: #040b1a;
+  --foreground: #e6edf7;
+
+  --card: rgba(255,255,255,0.04);
+  --card-foreground: #e6edf7;
+
+  --popover: #0b1220;
+  --popover-foreground: #e6edf7;
+
+  --primary: #4f8cff;
+  --primary-foreground: #ffffff;
+
+  --secondary: #7c5cff;
+  --secondary-foreground: #ffffff;
+
+  --muted: rgba(255,255,255,0.06);
+  --muted-foreground: #94a3b8;
+
+  --accent: rgba(79,140,255,0.08);
+  --accent-foreground: #4f8cff;
+
+  --destructive: #ff4d6d;
+  --destructive-foreground: #ffffff;
+
+  --border: rgba(255,255,255,0.08);
+
+  --input: rgba(255,255,255,0.06);
+
+  --ring: #4f8cff;
+
+  --sidebar: #050b1a;
+  --sidebar-foreground: #e6edf7;
+
+  --sidebar-primary: #4f8cff;
+  --sidebar-primary-foreground: #ffffff;
+
+  --sidebar-accent: rgba(79,140,255,0.12);
+  --sidebar-accent-foreground: #e6edf7;
+
+  --sidebar-border: rgba(255,255,255,0.06);
+}
+
+
+/* ------------------------------
+   THEME TOKENS
+-------------------------------*/
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-border: var(--border);
+
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+
+  --color-switch-background: var(--switch-background);
+
+  --color-ring: var(--ring);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+
+/* ------------------------------
+   BASE STYLES
+-------------------------------*/
+
+@layer base {
+
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+
+    /* subtle AI background gradient */
+    background-image:
+      radial-gradient(circle at 20% 20%, rgba(79,140,255,0.15), transparent 40%),
+      radial-gradient(circle at 80% 0%, rgba(124,92,255,0.15), transparent 40%);
+  }
+
+}
+
+
+/* ------------------------------
+   TYPOGRAPHY
+-------------------------------*/
+
+@layer base {
+
+  :where(:not(:has([class*=' text-']), :not(:has([class^='text-'])))) {
+
+    h1 {
+      font-size: var(--text-2xl);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h2 {
+      font-size: var(--text-xl);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h3 {
+      font-size: var(--text-lg);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h4 {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    label {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    button {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    input {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-normal);
+      line-height: 1.5;
+    }
+
+  }
+  body {
+  background:
+    radial-gradient(circle at 20% 30%, rgba(255, 100, 100, 0.35), transparent 40%),
+    radial-gradient(circle at 80% 10%, rgba(255, 120, 50, 0.35), transparent 40%),
+    radial-gradient(circle at 50% 80%, rgba(120, 80, 255, 0.35), transparent 50%),
+    #020617;
+}
+.glass-card {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+
+  border: 1px solid rgba(255,255,255,0.08);
+
+  box-shadow:
+    0 8px 32px rgba(0,0,0,0.4),
+    inset 0 1px rgba(255,255,255,0.06);
+
+  border-radius: 16px;
+}
+
+.glass-card-hover:hover {
+  border: 1px solid rgba(109,140,255,0.4);
+  box-shadow:
+    0 10px 40px rgba(0,0,0,0.5),
+    0 0 20px rgba(109,140,255,0.2);
+}
+
+}
+
+
+
+/* ------------------------------
+   ROOT FONT SIZE
+-------------------------------*/
+
+html {
+  font-size: var(--font-size);
+}
