@@ -1,0 +1,62 @@
+# Full Stack Notes
+
+## Backend
+
+From the project root:
+
+```bash
+pip install -r requirements.txt
+python -m uvicorn server:app --host 127.0.0.1 --port 8000
+```
+
+Available endpoints:
+
+- `GET /health`
+- `GET /api/metrics`
+- `GET /api/attention/stream`
+- `GET /video_feed`
+
+The backend writes `attention_metrics.json` on each frame.
+
+### Gaze model behavior
+
+- If `GAZE_MODEL_PATH` points to a valid `l2cs_net.onnx`, gaze is used.
+- If the model is missing, the backend still runs and uses head-pose-only scoring.
+- If `onnxruntime` is missing, gaze is disabled instead of crashing the whole app.
+
+## Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:3000`.
+
+The frontend connects to the backend through:
+
+- `/api/attention/stream` for live SSE updates
+- `/api/metrics` as a polling fallback
+- `/video_feed` for the MJPEG webcam stream
+- `/health` for connectivity checks
+
+### Custom API URL
+
+Leave `VITE_API_URL` empty to use the Vite proxy, or set it explicitly when hosting the frontend separately.
+
+## Metrics Shape
+
+```json
+{
+  "timestamp": 1730000000.0,
+  "person_detected": true,
+  "attention_percent": 72,
+  "instantaneous_percent": 70,
+  "label": "Moderately Attentive",
+  "pose_score": 0.85,
+  "gaze_score": 0.55,
+  "smoothed_score": 0.72,
+  "instantaneous_score": 0.71
+}
+```
