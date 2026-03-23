@@ -69,3 +69,4 @@ logs/
 
 # Live metrics (written by metrics_writer.py / server.py)
 attention_metrics.json
+mp_env/
