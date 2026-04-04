@@ -8,22 +8,50 @@ export function WebcamPreview({ mirrored = true }: WebcamPreviewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const toFriendlyError = (err: unknown): string => {
+    if (!(err instanceof DOMException)) {
+      return (err as Error)?.message || "Unable to access webcam";
+    }
+
+    if (err.name === "NotAllowedError") {
+      return "Camera permission is blocked. Allow camera access in the browser and try again.";
+    }
+    if (err.name === "NotFoundError") {
+      return "No camera device was found. Connect a webcam and retry.";
+    }
+    if (err.name === "NotReadableError") {
+      return "Camera is busy in another app (often the Python client). Disable preview there or close that app, then retry.";
+    }
+    if (err.name === "OverconstrainedError") {
+      return "Requested camera settings are not supported on this device. Retrying with default settings can help.";
+    }
+    return err.message || "Unable to access webcam";
+  };
+
   useEffect(() => {
     let stream: MediaStream | null = null;
 
     async function initCamera() {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
-          audio: false,
-        });
+        // Try preferred constraints first; fall back to defaults for stricter browser/device combos.
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+            audio: false,
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
         setError(null);
       } catch (err) {
-        setError((err as Error).message || "Unable to access webcam");
+        setError(toFriendlyError(err));
       }
     }
 
