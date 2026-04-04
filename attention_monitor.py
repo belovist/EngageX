@@ -52,8 +52,16 @@ class AttentionMonitor:
         selected_cap = None
         for cap in candidates:
             if cap is not None and cap.isOpened():
-                selected_cap = cap
-                break
+                # Some backends report opened but do not actually yield frames.
+                readable = False
+                for _ in range(5):
+                    ok, _frame = cap.read()
+                    if ok:
+                        readable = True
+                        break
+                if readable:
+                    selected_cap = cap
+                    break
             if cap is not None:
                 cap.release()
 

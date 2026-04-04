@@ -4,7 +4,7 @@ Distributed attention client.
 Runs local inference on a device and sends only attention scores to the central API.
 
 Usage:
-    python distributed_client.py --user-id student-1 --server-url http://127.0.0.1:8010
+    python distributed_client.py --user-id student-1 --server-url http://127.0.0.1:8000
 """
 
 from __future__ import annotations
@@ -38,13 +38,13 @@ def post_json(url: str, payload: Dict[str, Any], timeout: float = 5.0) -> bool:
 def build_payload(user_id: str, metrics: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     score = metrics.get("attention_percent")
     if not isinstance(score, (int, float)):
-        return None
+        score = 0.0
 
     return {
         "user_id": user_id,
         "score": float(score),
         "timestamp": time.time(),
-        "state": metrics.get("label"),
+        "state": metrics.get("label") or "No person detected",
         "pose_score": metrics.get("pose_score"),
         "gaze_score": metrics.get("gaze_score"),
         "source": "edge-client",
@@ -78,7 +78,27 @@ def run_client(
     try:
         while True:
             ret, frame = monitor.cap.read()
+            now = time.time()
             if not ret:
+                if now - last_sent >= interval_sec:
+                    payload = {
+                        "user_id": user_id,
+                        "score": 0.0,
+                        "timestamp": now,
+                        "state": "Camera unavailable",
+                        "pose_score": None,
+                        "gaze_score": None,
+                        "source": "edge-client",
+                    }
+                    ok = post_json(endpoint, payload)
+                    if ok:
+                        sent_count += 1
+                    else:
+                        fail_count += 1
+
+                    print(f"[{time.strftime('%H:%M:%S')}] camera=unavailable sent={'yes' if ok else 'no'}")
+                    last_sent = now
+
                 time.sleep(0.05)
                 continue
 
@@ -95,7 +115,6 @@ def run_client(
                     metrics=metrics,
                 )
 
-            now = time.time()
             if now - last_sent < interval_sec:
                 if display:
                     import cv2
@@ -138,7 +157,7 @@ def run_client(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Distributed attention score client")
     parser.add_argument("--user-id", required=True, help="Unique participant identifier")
-    parser.add_argument("--server-url", default="http://127.0.0.1:8010", help="Backend base URL")
+    parser.add_argument("--server-url", default="http://127.0.0.1:8000", help="Backend base URL")
     parser.add_argument("--camera-id", type=int, default=0, help="Camera index")
     parser.add_argument(
         "--interval",
