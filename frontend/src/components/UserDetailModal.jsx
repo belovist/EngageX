@@ -58,17 +58,18 @@ export function UserDetailModal({ user, onClose }) {
 
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]">
             <div>
-              <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950">
-                {user.videoSrc ? (
+              {user.videoSrc ? (
+                <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950">
                   <div className="aspect-video">
                     <img src={user.videoSrc} alt={user.name} className="h-full w-full object-cover" />
                   </div>
-                ) : (
-                  <div className="flex aspect-video items-center justify-center text-slate-500">
-                    <ScanFace size={26} />
-                  </div>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-slate-300">
+                  <ScanFace size={14} className="text-slate-400" />
+                  Score-only mode (no video sent to host)
+                </div>
+              )}
 
               <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {stats.map((stat) => (

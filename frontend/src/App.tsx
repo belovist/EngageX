@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import {
   Activity,
-  Camera,
   Clock3,
   Eye,
   FileJson,
   FileSpreadsheet,
   Printer,
-  ScanFace,
   Target,
   TrendingUp,
+  Users,
   Wifi,
   WifiOff,
 } from 'lucide-react';
@@ -21,11 +21,13 @@ import { StatisticsCards } from './components/StatisticsCards';
 import { UserDetailModal } from './components/UserDetailModal';
 import { UserGrid } from './components/UserGrid';
 import { ThemeProvider } from './context/ThemeContext';
-import { apiUrl } from './config';
-import { type AttentionMetrics, useAttentionStream } from './hooks/useAttentionStream';
+import {
+  type DistributedUser,
+  useDistributedAttentionStream,
+} from './hooks/useDistributedAttentionStream';
 
 type DashboardUser = {
-  id: number;
+  id: string;
   name: string;
   status: string;
   score: number | null;
@@ -54,7 +56,7 @@ type ExportOption = {
   format: string;
   desc: string;
   action: () => void;
-  icon: JSX.Element;
+  icon: ReactNode;
 };
 
 function clampScore(score: number | null | undefined): number | null {
@@ -107,7 +109,8 @@ function buildPrintMarkup(args: {
   peakScore: string;
   latestScore: string;
   history: Array<{ time: string; score: number }>;
-  metrics: AttentionMetrics | null;
+  activeUsers: number;
+  lowAttentionUsers: string[];
 }) {
   const rows = args.history
     .slice(-20)
@@ -143,8 +146,8 @@ function buildPrintMarkup(args: {
       <div class="card"><div class="label">Average Score</div><div class="value">${args.averageScore}</div></div>
       <div class="card"><div class="label">Peak Score</div><div class="value">${args.peakScore}</div></div>
       <div class="card"><div class="label">Latest Score</div><div class="value">${args.latestScore}</div></div>
-      <div class="card"><div class="label">Person Detected</div><div class="value">${args.metrics?.person_detected ? 'Yes' : 'No'}</div></div>
-      <div class="card"><div class="label">Attention Label</div><div class="value">${args.metrics?.label || 'Waiting'}</div></div>
+      <div class="card"><div class="label">Active Users</div><div class="value">${args.activeUsers}</div></div>
+      <div class="card"><div class="label">Low Attention Users</div><div class="value">${args.lowAttentionUsers.length}</div></div>
     </div>
     <table>
       <thead>
@@ -156,29 +159,53 @@ function buildPrintMarkup(args: {
 </html>`;
 }
 
+function makeUserName(userId: string): string {
+  return `Participant ${userId}`;
+}
+
+function formatUserState(state: string | null): string {
+  if (!state || !state.trim()) return 'Tracking';
+  return state;
+}
+
+function formatAnalyticsTime(timestampSec: number): string {
+  if (!timestampSec) return 'Waiting for backend data';
+  return formatClock(timestampSec * 1000);
+}
+
 function AppContent() {
-  const { metrics, backendOk, connection } = useAttentionStream();
+  const { users, analytics, backendOk, connection } = useDistributedAttentionStream();
   const [chartData, setChartData] = useState<Array<{ time: string; score: number }>>([]);
   const [sessionStart] = useState(() => Date.now());
   const [durationLabel, setDurationLabel] = useState('0s');
   const [activeView, setActiveView] = useState('dashboard');
-  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
   const lastChartTs = useRef(0);
-  const videoFeedUrl = useMemo(() => apiUrl('/video_feed'), []);
+  const userHistoryRef = useRef<Record<string, number[]>>({});
 
   useEffect(() => {
-    if (!metrics || typeof metrics.attention_percent !== 'number') return;
-
-    const timestampMs = (metrics.timestamp || Date.now() / 1000) * 1000;
+    if (typeof analytics.class_average !== 'number') return;
+    const timestampMs = (analytics.updated_at || Date.now() / 1000) * 1000;
     if (timestampMs - lastChartTs.current < 350) return;
     lastChartTs.current = timestampMs;
 
     setChartData((prev) => {
-      const next = [...prev, { time: formatClock(timestampMs), score: metrics.attention_percent }];
+      const next = [...prev, { time: formatClock(timestampMs), score: analytics.class_average }];
       return next.length > 90 ? next.slice(-90) : next;
     });
-  }, [metrics]);
+  }, [analytics.class_average, analytics.updated_at]);
+
+  useEffect(() => {
+    const nextHistory = { ...userHistoryRef.current };
+    users.forEach((user) => {
+      if (!Number.isFinite(user.score)) return;
+      const list = nextHistory[user.user_id] ?? [];
+      list.push(user.score);
+      nextHistory[user.user_id] = list.length > 240 ? list.slice(-240) : list;
+    });
+    userHistoryRef.current = nextHistory;
+  }, [users]);
 
   useEffect(() => {
     const intervalId = setInterval(() => setDurationLabel(formatDuration(sessionStart)), 1000);
@@ -187,7 +214,8 @@ function AppContent() {
   }, [sessionStart]);
 
   const historyValues = chartData.map((point) => point.score);
-  const latestScore = clampScore(metrics?.attention_percent) ?? clampScore(historyValues.at(-1));
+  const latestScore =
+    clampScore(analytics.class_average) ?? clampScore(historyValues.at(-1));
   const averageScore =
     historyValues.length > 0
       ? Math.round(historyValues.reduce((sum, value) => sum + value, 0) / historyValues.length)
@@ -208,76 +236,83 @@ function AppContent() {
           : 'Offline';
 
   const backendLabel = backendOk ? connectionLabel : 'Backend offline';
-  const lastUpdatedLabel = metrics?.timestamp
-    ? formatClock(metrics.timestamp * 1000)
-    : 'Waiting for backend data';
-  const detectedParticipants = metrics?.person_detected ? 1 : 0;
+  const lastUpdatedLabel = formatAnalyticsTime(analytics.updated_at);
+  const detectedParticipants = analytics.active_users;
 
   const liveStatus = useMemo(() => {
-    if (!backendOk && !metrics) return 'Offline';
-    if (connection === 'connecting' && !metrics) return 'Connecting';
-    if (!metrics) return 'Waiting';
-    if (!backendOk) return 'Offline';
-    if (!metrics.person_detected) return metrics.label || 'No person';
-    return metrics.label || 'Tracking';
-  }, [backendOk, connection, metrics]);
+    if (!backendOk && users.length === 0) return 'Offline';
+    if (connection === 'connecting' && users.length === 0) return 'Connecting';
+    if (users.length === 0) return 'Waiting';
+    return 'Tracking';
+  }, [backendOk, connection, users.length]);
 
-  const liveUser = useMemo<DashboardUser[]>(() => {
-    const detailParts: string[] = [];
+  const liveUsers = useMemo<DashboardUser[]>(() => {
+    const mappedUsers = users
+      .slice()
+      .sort((a, b) => a.user_id.localeCompare(b.user_id))
+      .map((user: DistributedUser) => {
+        const userHistory = userHistoryRef.current[user.user_id] ?? [];
+        const userAverage =
+          userHistory.length > 0
+            ? Math.round(userHistory.reduce((sum, value) => sum + value, 0) / userHistory.length)
+            : null;
+        const userPeak = userHistory.length > 0 ? Math.round(Math.max(...userHistory)) : null;
+        const updatedLabel = formatAnalyticsTime(user.timestamp);
 
-    if (!backendOk && !metrics) {
-      detailParts.push('Backend unavailable. Start the API server to resume monitoring.');
-    } else if (!metrics) {
-      detailParts.push('Waiting for the first metrics packet from the backend.');
-    } else if (!metrics.person_detected) {
-      detailParts.push('Camera is live, but nobody is currently centered in frame.');
-    } else {
-      if (metrics.pose_score != null) {
-        detailParts.push(`Pose ${Math.round(metrics.pose_score * 100)}%`);
-      }
-      if (metrics.gaze_score != null) {
-        detailParts.push(`Gaze ${Math.round(metrics.gaze_score * 100)}%`);
-      }
-      detailParts.push(`Label ${metrics.label || 'Tracking'}`);
-    }
+        return {
+          id: user.user_id,
+          name: makeUserName(user.user_id),
+          status: formatUserState(user.state),
+          score: clampScore(user.score),
+          detail: `Score posted by edge client | Updated ${updatedLabel}`,
+          source: user.source || 'edge-client',
+          averageScore: userAverage,
+          peakScore: userPeak,
+          sessionDuration: durationLabel,
+          lastUpdated: updatedLabel,
+          posePercent: user.pose_score != null ? Math.round(user.pose_score * 100) : null,
+          gazePercent: user.gaze_score != null ? Math.round(user.gaze_score * 100) : null,
+          connectionLabel,
+          personDetected: true,
+          videoSrc: undefined,
+        };
+      });
 
-    detailParts.push(`Updated ${lastUpdatedLabel}`);
+    if (mappedUsers.length > 0) return mappedUsers;
 
     return [
       {
-        id: 1,
-        name: 'Live Webcam Feed',
+        id: 'no-users',
+        name: 'No Active Users',
         status: liveStatus,
         score: latestScore,
-        detail: detailParts.join(' | '),
-        source: 'Webcam /video_feed',
+        detail: 'Waiting for score events from distributed clients.',
+        source: 'Distributed API',
         averageScore,
         peakScore,
         sessionDuration: durationLabel,
         lastUpdated: lastUpdatedLabel,
-        posePercent: metrics?.pose_score != null ? Math.round(metrics.pose_score * 100) : null,
-        gazePercent: metrics?.gaze_score != null ? Math.round(metrics.gaze_score * 100) : null,
+        posePercent: null,
+        gazePercent: null,
         connectionLabel,
-        personDetected: Boolean(metrics?.person_detected),
-        videoSrc: backendOk ? videoFeedUrl : undefined,
+        personDetected: false,
+        videoSrc: undefined,
       },
     ];
   }, [
     averageScore,
-    backendOk,
     connectionLabel,
     durationLabel,
     lastUpdatedLabel,
     latestScore,
     liveStatus,
-    metrics,
     peakScore,
-    videoFeedUrl,
+    users,
   ]);
 
   const selectedUser = useMemo(
-    () => liveUser.find((user) => user.id === selectedUserId) ?? null,
-    [liveUser, selectedUserId]
+    () => liveUsers.find((user) => user.id === selectedUserId) ?? null,
+    [liveUsers, selectedUserId]
   );
 
   const rawAlerts = useMemo<AlertItem[]>(() => {
@@ -303,38 +338,38 @@ function AppContent() {
       });
     }
 
-    if (metrics && backendOk && !metrics.person_detected) {
+    if (backendOk && analytics.active_users === 0) {
       nextAlerts.push({
-        id: 'no-subject',
+        id: 'no-users',
         type: 'warning',
-        title: 'No person detected',
-        message: 'The camera is online, but the model is not tracking a person in the current frame.',
+        title: 'No active clients',
+        message: 'Backend is running, but no distributed clients are posting score events right now.',
         timestamp: lastUpdatedLabel,
       });
     }
 
-    if (metrics?.person_detected && latestScore != null && latestScore < 50) {
+    if (latestScore != null && latestScore < 50) {
       nextAlerts.push({
-        id: 'low-attention',
+        id: 'low-class-attention',
         type: 'critical',
-        title: 'Attention dropped below threshold',
-        message: `Current attention is ${latestScore}%. Review the live feed or posture and gaze breakdown.`,
+        title: 'Class attention dropped below threshold',
+        message: `Current class attention is ${latestScore}%. Review participants listed in low-attention users.`,
         timestamp: lastUpdatedLabel,
       });
     }
 
-    if (metrics?.person_detected && metrics.gaze_score == null) {
+    if (analytics.low_attention_users.length > 0) {
       nextAlerts.push({
-        id: 'gaze-unavailable',
-        type: 'info',
-        title: 'Gaze model unavailable',
-        message: 'Head pose is still contributing, but gaze scoring is currently unavailable for this session.',
+        id: 'low-users',
+        type: 'warning',
+        title: 'Low-attention participants detected',
+        message: analytics.low_attention_users.join(', '),
         timestamp: lastUpdatedLabel,
       });
     }
 
     return nextAlerts;
-  }, [backendOk, connection, lastUpdatedLabel, latestScore, metrics]);
+  }, [analytics.active_users, analytics.low_attention_users, backendOk, connection, lastUpdatedLabel, latestScore]);
 
   useEffect(() => {
     const activeIds = new Set(rawAlerts.map((alert) => alert.id));
@@ -352,18 +387,18 @@ function AppContent() {
       totalParticipants: detectedParticipants,
       averageScore: averageScore == null ? '--' : averageScore,
       duration: durationLabel,
-      statusLabel: backendLabel,
-      statusTone: backendOk ? (metrics?.person_detected ? 'live' : 'warning') : 'offline',
-      sourceLabel: 'Webcam /video_feed',
+      statusLabel: backendOk ? `${backendLabel} (${detectedParticipants} users)` : backendLabel,
+      statusTone: backendOk ? (detectedParticipants > 0 ? 'live' : 'warning') : 'offline',
+      sourceLabel: 'Distributed edge clients',
       lastUpdatedLabel,
     }),
-    [averageScore, backendLabel, backendOk, detectedParticipants, durationLabel, lastUpdatedLabel, metrics]
+    [averageScore, backendLabel, backendOk, detectedParticipants, durationLabel, lastUpdatedLabel]
   );
 
   const stats = useMemo(
     () => [
       {
-        label: 'Camera Feed',
+        label: 'Backend',
         value: backendOk ? 'Live' : 'Offline',
         icon: backendOk ? <Wifi size={20} className="text-blue-300" /> : <WifiOff size={20} className="text-red-300" />,
         iconShellClass: backendOk
@@ -372,16 +407,16 @@ function AppContent() {
         valueClass: backendOk ? 'text-white' : 'text-red-300',
       },
       {
-        label: 'Subject Visible',
-        value: metrics?.person_detected ? 'Yes' : 'No',
-        icon: <Eye size={20} className={metrics?.person_detected ? 'text-green-300' : 'text-amber-300'} />,
-        iconShellClass: metrics?.person_detected
+        label: 'Active Users',
+        value: String(detectedParticipants),
+        icon: <Users size={20} className={detectedParticipants > 0 ? 'text-green-300' : 'text-amber-300'} />,
+        iconShellClass: detectedParticipants > 0
           ? 'bg-green-500/10 border-green-400/20'
           : 'bg-amber-500/10 border-amber-400/20',
-        valueClass: metrics?.person_detected ? 'text-white' : 'text-amber-200',
+        valueClass: detectedParticipants > 0 ? 'text-white' : 'text-amber-200',
       },
       {
-        label: 'Average Score',
+        label: 'Class Average',
         value: averageScore == null ? '--' : `${averageScore}%`,
         icon: <Target size={20} className="text-yellow-300" />,
         iconShellClass: 'bg-yellow-500/10 border-yellow-400/20',
@@ -396,7 +431,7 @@ function AppContent() {
         valueClass: 'text-white',
       },
       {
-        label: 'Peak Score',
+        label: 'Peak Class Score',
         value: peakScore == null ? '--' : `${peakScore}%`,
         icon: <TrendingUp size={20} className="text-cyan-300" />,
         iconShellClass: 'bg-cyan-500/10 border-cyan-400/20',
@@ -404,7 +439,7 @@ function AppContent() {
         trend: peakScore != null && averageScore != null ? Math.max(peakScore - averageScore, 0) : undefined,
       },
     ],
-    [averageScore, backendOk, durationLabel, metrics?.person_detected, peakScore, trendDelta]
+    [averageScore, backendOk, detectedParticipants, durationLabel, peakScore, trendDelta]
   );
 
   const exportPayload = useMemo(
@@ -412,11 +447,12 @@ function AppContent() {
       session: sessionData,
       backendOk,
       connection,
-      metrics,
+      analytics,
+      users,
       chartHistory: chartData,
       exportedAt: new Date().toISOString(),
     }),
-    [backendOk, chartData, connection, metrics, sessionData]
+    [analytics, backendOk, chartData, connection, sessionData, users]
   );
 
   const exportOptions = useMemo<ExportOption[]>(
@@ -450,7 +486,8 @@ function AppContent() {
               peakScore: peakScore == null ? '--' : `${peakScore}%`,
               latestScore: latestScore == null ? '--' : `${latestScore}%`,
               history: chartData,
-              metrics,
+              activeUsers: analytics.active_users,
+              lowAttentionUsers: analytics.low_attention_users,
             })
           );
           reportWindow.document.close();
@@ -460,7 +497,19 @@ function AppContent() {
         icon: <Printer size={20} className="text-fuchsia-300" />,
       },
     ],
-    [averageScore, chartData, connectionLabel, durationLabel, exportPayload, lastUpdatedLabel, latestScore, metrics, peakScore, sessionData.sessionId]
+    [
+      analytics.active_users,
+      analytics.low_attention_users,
+      averageScore,
+      chartData,
+      connectionLabel,
+      durationLabel,
+      exportPayload,
+      lastUpdatedLabel,
+      latestScore,
+      peakScore,
+      sessionData.sessionId,
+    ]
   );
 
   return (
@@ -512,11 +561,11 @@ function AppContent() {
 
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]">
               <UserGrid
-                users={liveUser}
-                title="Live Monitor"
-                description="Your original dashboard layout, now backed by the real webcam stream and metrics API."
-                emptyMessage="Waiting for the webcam feed to come online."
-                onUserSelect={(user) => setSelectedUserId(Number(user.id))}
+                users={liveUsers.filter((user) => user.id !== 'no-users')}
+                title="Participant Grid"
+                description="Each card is a distributed client posting attention events to the central backend."
+                emptyMessage="Waiting for distributed clients to post their first score."
+                onUserSelect={(user) => setSelectedUserId(String(user.id))}
               />
 
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-xl">
@@ -533,9 +582,9 @@ function AppContent() {
                 <div className="space-y-3">
                   {[
                     { label: 'Transport', value: connectionLabel },
-                    { label: 'Current Label', value: metrics?.label || 'Waiting' },
-                    { label: 'Pose Score', value: metrics?.pose_score != null ? `${Math.round(metrics.pose_score * 100)}%` : '--' },
-                    { label: 'Gaze Score', value: metrics?.gaze_score != null ? `${Math.round(metrics.gaze_score * 100)}%` : '--' },
+                    { label: 'Class Average', value: analytics.class_average != null ? `${Math.round(analytics.class_average)}%` : '--' },
+                    { label: 'Min Score', value: analytics.min_score != null ? `${Math.round(analytics.min_score)}%` : '--' },
+                    { label: 'Max Score', value: analytics.max_score != null ? `${Math.round(analytics.max_score)}%` : '--' },
                     { label: 'Last Update', value: lastUpdatedLabel },
                     { label: 'Lowest Score', value: lowScore == null ? '--' : `${lowScore}%` },
                   ].map((item) => (
@@ -550,7 +599,7 @@ function AppContent() {
                 </div>
 
                 <div className="mt-5 rounded-xl border border-dashed border-blue-400/20 bg-blue-500/5 p-4 text-sm text-slate-300">
-                  Export-ready session snapshot is available from the sidebar whenever you want to save the current run.
+                  Export-ready session snapshot includes class analytics and latest per-user metrics.
                 </div>
               </div>
             </div>
@@ -560,27 +609,34 @@ function AppContent() {
         {activeView === 'monitor' && (
           <>
             <div className="mb-6 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,0.9fr)]">
-              <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-xl">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-xl">
                 <div className="mb-5 flex items-center gap-3">
                   <div className="rounded-xl border border-white/10 bg-blue-500/10 p-2 text-blue-300">
-                    <Camera size={18} />
+                    <Eye size={18} />
                   </div>
                   <div>
-                    <h2 className="text-lg font-semibold text-white">Live Camera Feed</h2>
-                    <p className="text-sm text-slate-400">Direct MJPEG stream from the backend pipeline.</p>
+                    <h2 className="text-lg font-semibold text-white">Distributed Monitor</h2>
+                    <p className="text-sm text-slate-400">Live per-user events from edge clients.</p>
                   </div>
                 </div>
 
-                <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/80">
-                  <div className="aspect-video">
-                    <img
-                      src={videoFeedUrl}
-                      alt="Live webcam feed"
-                      className="h-full w-full object-cover"
-                      onError={(event) => {
-                        (event.target as HTMLImageElement).style.opacity = '0.25';
-                      }}
-                    />
+                <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-5">
+                  <p className="mb-3 text-sm text-slate-300">
+                    Low-attention users ({analytics.low_attention_users.length})
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {analytics.low_attention_users.length > 0 ? (
+                      analytics.low_attention_users.map((userId) => (
+                        <span
+                          key={userId}
+                          className="rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-200"
+                        >
+                          {userId}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-sm text-slate-400">No users below attention threshold.</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -588,11 +644,11 @@ function AppContent() {
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-xl">
                 <div className="mb-5 flex items-center gap-3">
                   <div className="rounded-xl border border-white/10 bg-violet-500/10 p-2 text-violet-300">
-                    <ScanFace size={18} />
+                    <Activity size={18} />
                   </div>
                   <div>
                     <h2 className="text-lg font-semibold text-white">Live Diagnostics</h2>
-                    <p className="text-sm text-slate-400">Current backend and model output for this one active feed.</p>
+                    <p className="text-sm text-slate-400">Current class metrics from distributed aggregation.</p>
                   </div>
                 </div>
 
@@ -601,9 +657,9 @@ function AppContent() {
                     { label: 'Current', value: latestScore == null ? '--' : `${latestScore}%` },
                     { label: 'Average', value: averageScore == null ? '--' : `${averageScore}%` },
                     { label: 'Peak', value: peakScore == null ? '--' : `${peakScore}%` },
-                    { label: 'Detected', value: metrics?.person_detected ? 'Yes' : 'No' },
-                    { label: 'Pose', value: metrics?.pose_score != null ? `${Math.round(metrics.pose_score * 100)}%` : '--' },
-                    { label: 'Gaze', value: metrics?.gaze_score != null ? `${Math.round(metrics.gaze_score * 100)}%` : '--' },
+                    { label: 'Users', value: String(analytics.active_users) },
+                    { label: 'Min', value: analytics.min_score != null ? `${Math.round(analytics.min_score)}%` : '--' },
+                    { label: 'Max', value: analytics.max_score != null ? `${Math.round(analytics.max_score)}%` : '--' },
                   ].map((item) => (
                     <div
                       key={item.label}
@@ -629,11 +685,11 @@ function AppContent() {
             />
 
             <UserGrid
-              users={liveUser}
-              title="Feed Analytics"
-              description="Single-subject monitoring with real pose, gaze, duration, and score breakdowns."
-              emptyMessage="No live feed available right now."
-              onUserSelect={(user) => setSelectedUserId(Number(user.id))}
+              users={liveUsers.filter((user) => user.id !== 'no-users')}
+              title="Participant Analytics"
+              description="Multi-user distributed monitoring with latest score and model breakdown per participant."
+              emptyMessage="No distributed user metrics available yet."
+              onUserSelect={(user) => setSelectedUserId(String(user.id))}
             />
           </>
         )}
@@ -668,7 +724,7 @@ function AppContent() {
                 { label: 'Session ID', value: sessionData.sessionId },
                 { label: 'Samples Captured', value: chartData.length.toString() },
                 { label: 'Current Score', value: latestScore == null ? '--' : `${latestScore}%` },
-                { label: 'Status', value: backendLabel },
+                  { label: 'Status', value: `${backendLabel} | ${analytics.active_users} users` },
               ].map((item) => (
                 <div key={item.label} className="rounded-xl border border-white/10 bg-slate-950/40 p-4">
                   <p className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{item.label}</p>

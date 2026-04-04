@@ -30,7 +30,8 @@ pip install -r requirements.txt
 ### 2. Start the backend
 
 ```bash
-python -m uvicorn server:app --host 127.0.0.1 --port 8000
+cd attention-monitor/backend
+python -m uvicorn main:app --host 127.0.0.1 --port 8010
 ```
 
 Backend endpoints:
@@ -39,8 +40,14 @@ Backend endpoints:
 - `GET /api/metrics`
 - `GET /api/attention/stream`
 - `GET /video_feed`
+- `POST /api/attention/score`
+- `GET /api/attention/users`
+- `GET /api/attention/analytics`
+- `GET /api/attention/history/{user_id}`
+- `GET /api/attention/distributed/stream`
 
 The backend also writes `attention_metrics.json` on each frame.
+It also logs distributed score events in `attention_scores.db`.
 
 ### 3. Start the frontend
 
@@ -54,7 +61,7 @@ npm run dev
 
 Open `http://127.0.0.1:3000`.
 
-The Vite dev server proxies `/api`, `/video_feed`, and `/health` to `http://127.0.0.1:8000`.
+The Vite dev server proxies `/api`, `/video_feed`, and `/health` to `http://127.0.0.1:8010`.
 
 ## Other Modes
 
@@ -76,6 +83,28 @@ python attention_monitor.py
 
 Press `q` to quit.
 
+### Distributed client mode (multi-device)
+
+Run this script on each participant device:
+
+```bash
+python distributed_client.py --user-id student-1 --server-url http://127.0.0.1:8010
+```
+
+This sends only score events (no video) every 1-2 seconds:
+
+```json
+{
+	"user_id": "student-1",
+	"score": 74.0,
+	"timestamp": 1730000000.0,
+	"state": "Attentive",
+	"pose_score": 0.82,
+	"gaze_score": 0.67,
+	"source": "edge-client"
+}
+```
+
 ## Optional Environment Variables
 
 - `CAMERA_ID=0`
@@ -88,7 +117,7 @@ If `GAZE_MODEL_PATH` is missing, the system still runs and falls back to head-po
 
 - Live status uses SSE with polling fallback.
 - The webcam panel uses the MJPEG backend stream.
-- Set `VITE_API_URL` only if the backend is not running on localhost:8000.
+- Set `VITE_API_URL` only if the backend is not running on localhost:8010.
 
 ## Troubleshooting
 
@@ -97,7 +126,8 @@ If `GAZE_MODEL_PATH` is missing, the system still runs and falls back to head-po
 Use:
 
 ```bash
-python -m uvicorn server:app --host 127.0.0.1 --port 8000
+cd attention-monitor/backend
+python -m uvicorn main:app --host 127.0.0.1 --port 8010
 ```
 
 ### Camera not opening
@@ -120,6 +150,7 @@ If you hit a MediaPipe `solutions` import error, use a Python / MediaPipe combin
 attention_monitor.py    Main OpenCV pipeline
 metrics_writer.py       JSON-only writer
 server.py               FastAPI + SSE + MJPEG
+distributed_client.py   Edge client that posts scores to central backend
 gatekeeper.py           YOLO person detection
 head_pose.py            MediaPipe head pose estimation
 gaze_tracker.py         Optional ONNX gaze estimation

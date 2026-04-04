@@ -48,6 +48,7 @@ export function UserCard({ user, onClick }: UserCardProps) {
   const scoreColor = scoreAccent(user.score);
   const progressWidth = user.score == null ? 4 : Math.min(100, Math.max(4, user.score));
   const isInteractive = Boolean(onClick);
+  const hasVideo = Boolean(user.videoSrc);
 
   return (
     <div
@@ -66,42 +67,135 @@ export function UserCard({ user, onClick }: UserCardProps) {
       }`}
       style={{ boxShadow: `0 18px 42px -28px ${scoreColor}` }}
     >
-      <div className="grid grid-cols-1 gap-0 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-        <div className="relative overflow-hidden border-b border-white/10 xl:border-b-0 xl:border-r">
-          {user.videoSrc ? (
+      {hasVideo ? (
+        <div className="grid grid-cols-1 gap-0 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+          <div className="relative overflow-hidden border-b border-white/10 xl:border-b-0 xl:border-r">
             <div className="aspect-video bg-slate-950">
               <img src={user.videoSrc} alt={user.name} className="h-full w-full object-cover" />
             </div>
-          ) : (
-            <div className="flex aspect-video items-center justify-center bg-slate-950 text-slate-500">
-              <Camera size={28} />
-            </div>
-          )}
+ 
 
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950 via-slate-950/75 to-transparent p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-lg font-semibold text-white">{user.name}</p>
-                <p className="text-sm text-slate-300">{user.source || 'Live source'}</p>
-              </div>
+            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950 via-slate-950/75 to-transparent p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-lg font-semibold text-white">{user.name}</p>
+                  <p className="text-sm text-slate-300">{user.source || 'Live source'}</p>
+                </div>
 
-              <div
-                className="rounded-full border px-3 py-1 text-xs font-semibold"
-                style={{
-                  borderColor: `${statusColor}55`,
-                  color: statusColor,
-                  backgroundColor: `${statusColor}18`,
-                }}
-              >
-                {user.status}
+                <div
+                  className="rounded-full border px-3 py-1 text-xs font-semibold"
+                  style={{
+                    borderColor: `${statusColor}55`,
+                    color: statusColor,
+                    backgroundColor: `${statusColor}18`,
+                  }}
+                >
+                  {user.status}
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
+          <div className="p-5">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <p className="mb-1 text-xs uppercase tracking-[0.24em] text-slate-500">Current Attention</p>
+                <p className="text-4xl font-semibold text-white" style={{ color: scoreColor }}>
+                  {renderValue(user.score)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-right">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Connection</p>
+                <p className="text-sm font-medium text-slate-200">{user.connectionLabel || 'Live'}</p>
+              </div>
+            </div>
+
+            <div className="mb-5 h-2 overflow-hidden rounded-full bg-white/5">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${progressWidth}%`,
+                  background: `linear-gradient(90deg, ${scoreColor}, #8b5cf6)`,
+                }}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                {
+                  label: 'Average',
+                  value: renderValue(user.averageScore),
+                  icon: <Radar size={15} className="text-blue-300" />,
+                },
+                {
+                  label: 'Peak',
+                  value: renderValue(user.peakScore),
+                  icon: <ScanFace size={15} className="text-fuchsia-300" />,
+                },
+                {
+                  label: 'Pose',
+                  value: renderValue(user.posePercent),
+                  icon: <ScanFace size={15} className="text-emerald-300" />,
+                },
+                {
+                  label: 'Gaze',
+                  value: renderValue(user.gazePercent),
+                  icon: <Radar size={15} className="text-amber-300" />,
+                },
+              ].map((item) => (
+                <div key={item.label} className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    {item.icon}
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{item.label}</p>
+                  </div>
+                  <p className="text-lg font-semibold text-white">{item.value}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="mb-2 flex items-center gap-2 text-slate-400">
+                <Clock3 size={14} />
+                <span className="text-xs uppercase tracking-[0.2em]">Session</span>
+              </div>
+              <div className="mb-2 flex items-center justify-between gap-4 text-sm">
+                <span className="text-slate-400">Duration</span>
+                <span className="font-medium text-slate-200">{user.sessionDuration || '--'}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4 text-sm">
+                <span className="text-slate-400">Last Updated</span>
+                <span className="font-medium text-slate-200">{user.lastUpdated || '--'}</span>
+              </div>
+            </div>
+
+            {user.detail ? <p className="mt-4 text-sm leading-6 text-slate-400">{user.detail}</p> : null}
+
+            {isInteractive ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onClick?.();
+                }}
+                className="mt-5 inline-flex items-center gap-2 rounded-full border border-blue-400/30 bg-blue-500/10 px-4 py-2 text-sm font-semibold text-blue-200 transition-all duration-300 hover:border-blue-300/50 hover:bg-blue-500/15"
+              >
+                View Details
+                <ChevronRight size={16} className="transition-transform duration-300 group-hover:translate-x-0.5" />
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : (
         <div className="p-5">
           <div className="mb-5 flex items-start justify-between gap-4">
             <div>
+              <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-slate-400">
+                <Camera size={14} />
+                Score-only stream
+              </div>
+              <p className="text-lg font-semibold text-white">{user.name}</p>
+              <p className="text-sm text-slate-300">{user.source || 'Live source'}</p>
               <p className="mb-1 text-xs uppercase tracking-[0.24em] text-slate-500">Current Attention</p>
               <p className="text-4xl font-semibold text-white" style={{ color: scoreColor }}>
                 {renderValue(user.score)}
@@ -188,7 +282,7 @@ export function UserCard({ user, onClick }: UserCardProps) {
             </button>
           ) : null}
         </div>
-      </div>
+      )}
     </div>
   );
 }
