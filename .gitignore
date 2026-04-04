@@ -24,13 +24,15 @@ wheels/
 venv/
 env/
 ENV/
-.venv
+.venv/
 .venv311/
+mp_env/
 
 # Node / frontend
 node_modules/
 frontend/build/
 frontend/dist/
+frontend/release/
 
 # IDE
 .vscode/
@@ -39,15 +41,19 @@ frontend/dist/
 *.swo
 *~
 
-# Models and weights
+# Models and weights (keep in models/ directory)
 *.pt
 *.pth
-
+*.onnx
+*.onnx.data
 *.weights
 *.h5
 *.pb
+# But keep model README
+!models/README.md
+!models/.gitkeep
 
-# Data
+# Data files
 *.mp4
 *.avi
 *.mov
@@ -68,6 +74,12 @@ output/
 results/
 logs/
 
-# Live metrics (written by metrics_writer.py / server.py)
+# Generated files
 attention_metrics.json
-mp_env/
+attention_scores.db
+
+# Legacy external dependencies (clone separately)
+L2CS-Net/
+
+# Old/unused directories
+Info/

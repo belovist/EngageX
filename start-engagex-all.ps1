@@ -11,8 +11,8 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pythonExe = Join-Path $repoRoot ".venv\Scripts\python.exe"
 $frontendDir = Join-Path $repoRoot "frontend"
-$virtualCamScript = Join-Path $repoRoot "attention-monitor\client-desktop\run_virtual_cam.py"
-$distributedClientScript = Join-Path $repoRoot "distributed_client.py"
+$virtualCamScript = Join-Path $repoRoot "clients\desktop\run_virtual_cam.py"
+$distributedClientScript = Join-Path $repoRoot "clients\distributed_client.py"
 
 if (-not (Test-Path $pythonExe)) {
     throw "Python executable not found at $pythonExe. Ensure the project venv exists."
@@ -36,7 +36,7 @@ function Stop-ProcessOnPort {
             Stop-Process -Id $pid -Force -ErrorAction Stop
             Write-Host "Stopped process $pid on port $Port"
         } catch {
-            Write-Warning "Could not stop PID $pid on port $Port: $($_.Exception.Message)"
+            Write-Warning "Could not stop PID $pid on port ${Port}: $($_.Exception.Message)"
         }
     }
 }
@@ -75,7 +75,7 @@ if ($InstallFrontendDeps) {
     }
 }
 
-$backendCmd = "& '$pythonExe' -m uvicorn server:app --host 127.0.0.1 --port 8000 --reload"
+$backendCmd = "& '$pythonExe' -m uvicorn backend.server:app --host 127.0.0.1 --port 8000 --reload"
 Start-InNewTerminal -Title "EngageX Backend :8000" -WorkingDirectory $repoRoot -Command $backendCmd
 
 $frontendCmd = "npm run dev"

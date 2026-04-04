@@ -8,6 +8,8 @@ import { WebcamPreview } from "./components/WebcamPreview";
 export default function ParticipantApp() {
   const [participantId, setParticipantId] = useState(DEFAULT_PARTICIPANT_ID);
   const [previewEnabled, setPreviewEnabled] = useState(false);
+  const [publishEnabled, setPublishEnabled] = useState(true);
+  const [fallbackScore, setFallbackScore] = useState(72);
   const { participants, connected } = useAttentionScores();
 
   const participantList = useMemo(() => Object.values(participants), [participants]);
@@ -23,6 +25,37 @@ export default function ParticipantApp() {
   }, [participantId, participantList, participants]);
 
   const me = useMemo(() => participants[participantId] ?? participantList[0], [participantId, participantList, participants]);
+
+  useEffect(() => {
+    if (!publishEnabled) {
+      return;
+    }
+
+    const userId = participantId.trim() || DEFAULT_PARTICIPANT_ID;
+
+    const timer = window.setInterval(async () => {
+      const dynamicScore = fallbackScore + Math.sin(Date.now() / 1800) * 3;
+      const payload = {
+        user_id: userId,
+        score: Math.max(0, Math.min(100, Number(dynamicScore))),
+        timestamp: Date.now() / 1000,
+        state: previewEnabled ? "Browser participant active" : "Browser participant (preview off)",
+        source: "participant-client",
+      };
+
+      try {
+        await fetch("/api/attention/score", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        // Keep retrying in the next tick.
+      }
+    }, 1500);
+
+    return () => window.clearInterval(timer);
+  }, [fallbackScore, participantId, previewEnabled, publishEnabled]);
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
@@ -50,7 +83,7 @@ export default function ParticipantApp() {
           </p>
           <div className="mt-3 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
             <p className="text-xs text-amber-800">
-              Local browser preview can block the Python inference camera. Keep this off for accurate live scoring.
+              Local browser preview can block the Python inference camera. Keep preview off when running the Python participant client.
             </p>
             <button
               type="button"
@@ -59,6 +92,32 @@ export default function ParticipantApp() {
             >
               {previewEnabled ? "Disable Preview" : "Enable Preview"}
             </button>
+          </div>
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Browser Score Publisher</p>
+              <button
+                type="button"
+                onClick={() => setPublishEnabled((prev) => !prev)}
+                className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+              >
+                {publishEnabled ? "Publishing On" : "Publishing Off"}
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              This keeps host + participant dashboards live even without the Python client. For real AI scoring, run the Python participant pipeline.
+            </p>
+            <label className="mt-3 block text-xs text-slate-600">
+              Fallback Score: <span className="font-semibold">{Math.round(fallbackScore)}%</span>
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={fallbackScore}
+              onChange={(event) => setFallbackScore(Number(event.target.value))}
+              className="mt-1 w-full"
+            />
           </div>
         </header>
 
