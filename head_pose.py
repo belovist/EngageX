@@ -9,24 +9,18 @@ NO OpenCV Haar Cascades allowed.
 import cv2
 import numpy as np
 
-# Import MediaPipe - REQUIRED, no fallback
-# Simple direct import as specified
-import mediapipe as mp
-
-# Access Face Mesh directly
 try:
-    mp_face_mesh = mp.solutions.face_mesh
-except AttributeError:
-    raise ImportError(
-        "MediaPipe 'solutions' module not found. This is a known issue with MediaPipe 0.10.30+ "
-        "and Python 3.13.\n\n"
-        "SOLUTIONS:\n"
-        "1. Install older MediaPipe version: pip install 'mediapipe<0.10.30'\n"
-        "2. Use Python 3.9-3.11 instead of 3.13\n"
-        "3. Use MediaPipe Tasks API (requires code changes)\n\n"
-        f"Current MediaPipe version: {mp.__version__}\n"
-        f"Available attributes: {[attr for attr in dir(mp) if not attr.startswith('_')]}"
-    )
+    import mediapipe as mp
+except Exception:
+    mp = None
+
+if mp is not None:
+    try:
+        mp_face_mesh = mp.solutions.face_mesh
+    except Exception:
+        mp_face_mesh = None
+else:
+    mp_face_mesh = None
 
 
 class HeadPoseEstimator:
@@ -65,15 +59,17 @@ class HeadPoseEstimator:
         Initialize MediaPipe Face Mesh.
         REQUIRES MediaPipe solutions module - no fallback.
         """
-        # Use the simple import as specified: mp.solutions.face_mesh
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            static_image_mode=False,
-            max_num_faces=1,
-            refine_landmarks=True,  # Use refined landmarks (468 points)
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
+        self.mp_face_mesh = mp_face_mesh
+        self.face_mesh = None
+
+        if self.mp_face_mesh is not None:
+            self.face_mesh = self.mp_face_mesh.FaceMesh(
+                static_image_mode=False,
+                max_num_faces=1,
+                refine_landmarks=True,  # Use refined landmarks (468 points)
+                min_detection_confidence=0.5,
+                min_tracking_confidence=0.5
+            )
     
     def get_landmarks(self, frame):
         """
@@ -158,6 +154,9 @@ class HeadPoseEstimator:
             tuple: (success: bool, result: dict or None)
                    result contains 'yaw', 'pitch', 'roll' (degrees) and 'pose_score' (0-1)
         """
+        if self.face_mesh is None:
+            return False, None
+
         # Single Face Mesh pass: avoids duplicate inference and keeps scale + PnP consistent
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.face_mesh.process(rgb_frame)

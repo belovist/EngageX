@@ -6,7 +6,8 @@ From the project root:
 
 ```bash
 pip install -r requirements.txt
-python -m uvicorn server:app --host 127.0.0.1 --port 8000
+cd attention-monitor/backend
+python -m uvicorn main:app --host 127.0.0.1 --port 8010
 ```
 
 Available endpoints:
@@ -15,8 +16,14 @@ Available endpoints:
 - `GET /api/metrics`
 - `GET /api/attention/stream`
 - `GET /video_feed`
+- `POST /api/attention/score`
+- `GET /api/attention/users`
+- `GET /api/attention/analytics`
+- `GET /api/attention/history/{user_id}`
+- `GET /api/attention/distributed/stream`
 
 The backend writes `attention_metrics.json` on each frame.
+Distributed score events are persisted in `attention_scores.db`.
 
 ### Gaze model behavior
 

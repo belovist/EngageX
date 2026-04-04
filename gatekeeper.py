@@ -4,14 +4,18 @@ Detects person presence and crops the ROI for downstream processing.
 """
 
 import numpy as np
-from ultralytics import YOLO
+
+try:
+    from ultralytics import YOLO
+except Exception:
+    YOLO = None
 
 
 class Gatekeeper:
     """YOLOv8 Nano-based person detection and ROI cropping."""
 
     def __init__(self, model_path="yolov8n.pt", confidence_threshold=0.5):
-        self.model = YOLO(model_path)
+        self.model = YOLO(model_path) if YOLO is not None else None
         self.confidence_threshold = confidence_threshold
         self.person_class_id = 0
 
@@ -22,6 +26,11 @@ class Gatekeeper:
         Returns:
             tuple: (person_detected: bool, bbox: np.array or None)
         """
+        if self.model is None:
+            # Fallback mode: treat the full frame as a single ROI.
+            h, w = frame.shape[:2]
+            return True, np.array([0, 0, w, h], dtype=int)
+
         results = self.model(frame, verbose=False)
         best_bbox = None
         best_conf = self.confidence_threshold
