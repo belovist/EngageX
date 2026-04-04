@@ -1,5 +1,69 @@
 # Lightweight Attention Span Monitoring System - Implementation Plan
 
+## Runtime and Integration Update (April 2026)
+
+This section defines the current working integration layout used by the team.
+
+### Local service map
+
+- Frontend dev server: `127.0.0.1:3000`
+- Host route: `http://127.0.0.1:3000/host`
+- Participant route: `http://127.0.0.1:3000/participant`
+- Unified API backend: `127.0.0.1:8000` (`server.py`)
+
+Single backend note:
+- Host and participant UIs both target the same backend.
+- `attention-monitor/backend/main.py` is now a compatibility wrapper to the unified app.
+
+### Recommended startup
+
+Windows launcher from repo root:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\start-engagex-all.ps1 -CleanPorts
+```
+
+Virtual camera mode:
+
+```powershell
+.\start-engagex-all.ps1 -UseVirtualCam -CleanPorts
+```
+
+macOS/Linux launcher from repo root:
+
+```bash
+chmod +x ./start-engagex-all.sh
+./start-engagex-all.sh
+```
+
+macOS/Linux with participant client:
+
+```bash
+./start-engagex-all.sh --with-participant
+```
+
+### Participant runtime modes
+
+1. Score-only mode
+- Runs `distributed_client.py`
+- Captures webcam locally and sends score events to backend `:8000`
+
+2. Meeting-compatible mode
+- Runs `attention-monitor/client-desktop/run_virtual_cam.py`
+- Captures webcam, runs inference, sends scores, and publishes frames to a virtual camera device
+- Meeting apps should select the virtual camera device
+
+### Backend/API ownership
+
+- Backend process never opens webcam by itself.
+- Camera access belongs to participant clients or browser preview.
+- This is why camera permission prompts appear only when those clients start, not when backend starts.
+
+### Camera ownership rule
+
+Only one process should own the physical webcam at a time. If Python inference is active, browser preview may fail with camera-in-use errors.
+
 ## Architecture Overview
 
 This system implements a **4-stage linear pipeline** for real-time attention monitoring:

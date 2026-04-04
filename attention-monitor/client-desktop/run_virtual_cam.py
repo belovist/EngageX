@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=720, help="Virtual camera frame height")
     parser.add_argument("--fps", type=int, default=30, help="Virtual camera FPS")
     parser.add_argument("--user-id", default="desktop-user", help="User id for local scoring")
-    parser.add_argument("--backend-url", default="http://127.0.0.1:8010", help="Backend base URL")
+    parser.add_argument("--backend-url", default="http://127.0.0.1:8000", help="Backend base URL")
     parser.add_argument("--send-interval", type=float, default=1.5, help="Seconds between score posts")
     parser.add_argument("--gaze-model-path", default="l2cs_net.onnx", help="Path to L2CS ONNX model")
     parser.add_argument("--show-preview", action="store_true", help="Show local OpenCV preview")

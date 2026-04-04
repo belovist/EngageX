@@ -6,8 +6,7 @@ From the project root:
 
 ```bash
 pip install -r requirements.txt
-cd attention-monitor/backend
-python -m uvicorn main:app --host 127.0.0.1 --port 8010
+python -m uvicorn server:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Available endpoints:
