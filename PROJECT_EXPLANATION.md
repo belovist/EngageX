@@ -1,5 +1,30 @@
 # Real-Time Attention Monitoring System - Complete Project Explanation
 
+## Current Deployment Model (April 2026)
+
+### Active local ports
+- Frontend: `http://127.0.0.1:3000`
+- Primary backend (host/dashboard API): `http://127.0.0.1:8000`
+- Legacy `attention-monitor/backend/main.py` entrypoint maps to the same unified backend app.
+
+### How the system is intended to run
+1. Participant device captures camera locally and computes attention score.
+2. Participant client posts score events to backend (`/api/attention/score`).
+3. Host dashboard consumes backend streams (`/api/attention/stream`, `/api/metrics`) and shows class analytics.
+
+### Camera and meeting-app compatibility
+
+When Python inference owns the physical webcam, browser preview or meeting apps cannot reliably open the same device at the same time.
+
+- Score-only mode: use `distributed_client.py`.
+- Meeting-compatible mode: use `attention-monitor/client-desktop/run_virtual_cam.py` and select virtual camera in Zoom/Meet/Teams.
+
+OBS is optional as a product dependency, but a virtual camera layer is required if one app owns the physical camera and another app (meeting client) needs video input.
+
+### Team startup shortcut (Windows)
+
+Use `start-engagex-all.ps1` from repo root to start backend `:8000`, frontend `:3000`, and participant client with the correct port wiring.
+
 ## 📋 Table of Contents
 1. [System Overview](#system-overview)
 2. [Architecture & Pipeline](#architecture--pipeline)

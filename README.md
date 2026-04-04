@@ -30,8 +30,7 @@ pip install -r requirements.txt
 ### 2. Start the backend
 
 ```bash
-cd attention-monitor/backend
-python -m uvicorn main:app --host 127.0.0.1 --port 8010
+python -m uvicorn server:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Backend endpoints:
@@ -61,7 +60,7 @@ npm run dev
 
 Open `http://127.0.0.1:3000`.
 
-The Vite dev server proxies `/api`, `/video_feed`, and `/health` to `http://127.0.0.1:8010`.
+The Vite dev server proxies `/api`, `/video_feed`, and `/health` to `http://127.0.0.1:8000`.
 
 ## Other Modes
 
@@ -88,7 +87,7 @@ Press `q` to quit.
 Run this script on each participant device:
 
 ```bash
-python distributed_client.py --user-id student-1 --server-url http://127.0.0.1:8010
+python distributed_client.py --user-id student-1 --server-url http://127.0.0.1:8000
 ```
 
 This sends only score events (no video) every 1-2 seconds:
@@ -117,7 +116,7 @@ If `GAZE_MODEL_PATH` is missing, the system still runs and falls back to head-po
 
 - Live status uses SSE with polling fallback.
 - The webcam panel uses the MJPEG backend stream.
-- Set `VITE_API_URL` only if the backend is not running on localhost:8010.
+- Set `VITE_API_URL` only if the backend is not running on localhost:8000.
 
 ## Troubleshooting
 
@@ -126,8 +125,7 @@ If `GAZE_MODEL_PATH` is missing, the system still runs and falls back to head-po
 Use:
 
 ```bash
-cd attention-monitor/backend
-python -m uvicorn main:app --host 127.0.0.1 --port 8010
+python -m uvicorn server:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 ### Camera not opening

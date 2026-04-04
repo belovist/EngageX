@@ -57,7 +57,7 @@ function StatusPill({ state, okText, idleText, errorText }: { state: ConnectStat
 export function ParticipantApp() {
   const [meetingCode, setMeetingCode] = useState('ENGAGEX-ROOM-01');
   const [userId, setUserId] = useState('student-01');
-  const [backendUrl, setBackendUrl] = useState('http://127.0.0.1:8010');
+  const [backendUrl, setBackendUrl] = useState('http://127.0.0.1:8000');
   const [obsWsUrl, setObsWsUrl] = useState('ws://127.0.0.1:4455');
 
   const [joinState, setJoinState] = useState<ConnectState>('idle');
@@ -67,7 +67,7 @@ export function ParticipantApp() {
 
   const participantCommand = useMemo(() => {
     const escapedUser = userId.trim() || 'student-01';
-    const escapedBackend = backendUrl.trim() || 'http://127.0.0.1:8010';
+    const escapedBackend = backendUrl.trim() || 'http://127.0.0.1:8000';
     return `python attention-monitor/client-desktop/run_virtual_cam.py --user-id ${escapedUser} --backend-url ${escapedBackend}`;
   }, [userId, backendUrl]);
 
