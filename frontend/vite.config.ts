@@ -4,7 +4,25 @@
   import path from 'path';
 
   export default defineConfig({
-    plugins: [react()],
+    plugins: [
+      react(),
+      {
+        name: 'engagex-multi-entry-routes',
+        configureServer(server) {
+          server.middlewares.use((req, _res, next) => {
+            if (!req.url) {
+              next();
+              return;
+            }
+
+            if (req.url === '/host') req.url = '/index.html';
+            if (req.url === '/participant') req.url = '/participant.html';
+            if (req.url === '/obs-overlay') req.url = '/obs-overlay.html';
+            next();
+          });
+        },
+      },
+    ],
     resolve: {
       extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
       alias: {
@@ -52,15 +70,23 @@
     build: {
       target: 'esnext',
       outDir: 'build',
+      rollupOptions: {
+        input: {
+          host: path.resolve(__dirname, 'index.html'),
+          participant: path.resolve(__dirname, 'participant.html'),
+          'obs-overlay': path.resolve(__dirname, 'obs-overlay.html'),
+        },
+      },
     },
     server: {
       port: 3000,
       host: '127.0.0.1',
       open: true,
       proxy: {
-        '/api': { target: 'http://127.0.0.1:8010', changeOrigin: true },
-        '/video_feed': { target: 'http://127.0.0.1:8010', changeOrigin: true },
-        '/health': { target: 'http://127.0.0.1:8010', changeOrigin: true },
+        '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+        '/ws': { target: 'ws://127.0.0.1:8000', ws: true, changeOrigin: true },
+        '/video_feed': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+        '/health': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       },
     },
   });

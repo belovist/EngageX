@@ -118,7 +118,11 @@
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
-html, body, #root {
+html, body, #root, #participant-root, #obs-root {
   height: 100%;
   background-color: #020617;
+}
+
+body.obs-overlay {
+  background: transparent;
 }

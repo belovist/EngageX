@@ -1,460 +1,234 @@
-"""
-FastAPI backend: MJPEG video + live metrics JSON file + SSE stream for the React dashboard.
-
-Run (project root, venv activated):
-
-  python -m uvicorn server:app --host 0.0.0.0 --port 8000
-
-Env:
-  CAMERA_ID=0
-  GAZE_MODEL_PATH=l2cs_net.onnx   (skipped if file missing)
-  ATTENTION_METRICS_PATH=attention_metrics.json
-"""
-
 from __future__ import annotations
 
 import asyncio
 import json
-import os
-import sqlite3
-import threading
 import time
-from contextlib import asynccontextmanager
-from collections import deque
-from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, List
 
-import cv2
-import numpy as np
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from attention_monitor import AttentionMonitor
 
-_state_lock = threading.Lock()
-_state: Dict[str, Any] = {
-    "jpeg": None,
-    "metrics": {
-        "timestamp": 0.0,
-        "person_detected": False,
-        "attention_percent": None,
-        "instantaneous_percent": None,
-        "label": "Starting...",
-        "pose_score": None,
-        "gaze_score": None,
-        "smoothed_score": None,
-        "instantaneous_score": None,
-    },
-    "running": True,
-}
-
-_camera_thread: Optional[threading.Thread] = None
-_scores_lock = threading.Lock()
-_latest_scores: Dict[str, Dict[str, Any]] = {}
-_recent_scores: deque[Dict[str, Any]] = deque(maxlen=5000)
-_db_conn: Optional[sqlite3.Connection] = None
+class ScorePayload(BaseModel):
+    participant_id: str = Field(..., min_length=1, max_length=128)
+    name: str = Field(..., min_length=1, max_length=128)
+    attention_score: float = Field(..., ge=0, le=100)
+    gaze_x: float | None = Field(default=None, ge=0, le=1)
+    gaze_y: float | None = Field(default=None, ge=0, le=1)
+    timestamp: float = Field(default_factory=lambda: time.time())
 
 
-class AttentionScoreIn(BaseModel):
+class LegacyAttentionScorePayload(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=128)
-    score: float = Field(..., ge=0.0, le=100.0)
-    timestamp: Optional[float] = None
-    state: Optional[str] = Field(default=None, max_length=64)
-    pose_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    gaze_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    source: Optional[str] = Field(default="client")
+    score: float = Field(..., ge=0, le=100)
+    timestamp: float | None = None
+    state: str | None = Field(default=None, max_length=64)
+    pose_score: float | None = Field(default=None, ge=0, le=1)
+    gaze_score: float | None = Field(default=None, ge=0, le=1)
+    source: str | None = Field(default="client")
 
 
-def _init_db(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS attention_scores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,
-            score REAL NOT NULL,
-            timestamp REAL NOT NULL,
-            state TEXT,
-            pose_score REAL,
-            gaze_score REAL,
-            source TEXT
-        )
-        """
-    )
-    conn.commit()
-    return conn
+class ConnectionManager:
+    def __init__(self) -> None:
+        self.active_connections: List[WebSocket] = []
+        self.lock = asyncio.Lock()
 
+    async def connect(self, websocket: WebSocket) -> None:
+        await websocket.accept()
+        async with self.lock:
+            self.active_connections.append(websocket)
 
-def _persist_score(entry: Dict[str, Any]) -> None:
-    if _db_conn is None:
-        return
+    async def disconnect(self, websocket: WebSocket) -> None:
+        async with self.lock:
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
 
-    _db_conn.execute(
-        """
-        INSERT INTO attention_scores (user_id, score, timestamp, state, pose_score, gaze_score, source)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            entry["user_id"],
-            entry["score"],
-            entry["timestamp"],
-            entry.get("state"),
-            entry.get("pose_score"),
-            entry.get("gaze_score"),
-            entry.get("source"),
-        ),
-    )
-    _db_conn.commit()
+    async def broadcast(self, message: dict) -> None:
+        async with self.lock:
+            clients = list(self.active_connections)
 
-
-def _build_aggregate_snapshot() -> Dict[str, Any]:
-    with _scores_lock:
-        users = list(_latest_scores.values())
-
-    scores = [u["score"] for u in users if isinstance(u.get("score"), (int, float))]
-    avg = round(sum(scores) / len(scores), 2) if scores else None
-    min_score = round(min(scores), 2) if scores else None
-    max_score = round(max(scores), 2) if scores else None
-    low_users = sorted(
-        [u["user_id"] for u in users if isinstance(u.get("score"), (int, float)) and u["score"] < 50.0]
-    )
-    last_ts = max((u.get("timestamp", 0.0) for u in users), default=0.0)
-
-    return {
-        "active_users": len(users),
-        "class_average": avg,
-        "min_score": min_score,
-        "max_score": max_score,
-        "low_attention_users": low_users,
-        "updated_at": last_ts,
-    }
-
-
-def _build_placeholder_jpeg(message: str) -> bytes:
-    """Create a lightweight placeholder frame so MJPEG clients don't stall."""
-    canvas = np.zeros((480, 640, 3), dtype=np.uint8)
-    canvas[:] = (20, 20, 28)
-    cv2.putText(
-        canvas,
-        "EngageX Live Feed",
-        (24, 64),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.9,
-        (210, 210, 210),
-        2,
-    )
-    cv2.putText(
-        canvas,
-        message[:62],
-        (24, 120),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.65,
-        (160, 185, 255),
-        2,
-    )
-    cv2.putText(
-        canvas,
-        "Backend is running. Check camera permissions or device usage.",
-        (24, 168),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.52,
-        (170, 170, 170),
-        1,
-    )
-    ok, buffer = cv2.imencode(".jpg", canvas, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    if ok:
-        return buffer.tobytes()
-    return b""
-
-
-def _metrics_payload(results: dict) -> Dict[str, Any]:
-    metrics = results.get("metrics") or {}
-    return {
-        "timestamp": time.time(),
-        "person_detected": bool(results.get("person_detected")),
-        "attention_percent": metrics.get("attention_percent"),
-        "instantaneous_percent": metrics.get("instantaneous_percent"),
-        "label": metrics.get("label") or "No Data",
-        "pose_score": metrics.get("pose_score"),
-        "gaze_score": metrics.get("gaze_score"),
-        "smoothed_score": metrics.get("smoothed_score"),
-        "instantaneous_score": metrics.get("instantaneous_score"),
-    }
-
-
-def _camera_loop(camera_id: int = 0, gaze_model_path: Optional[str] = None) -> None:
-    monitor = AttentionMonitor(
-        camera_id=camera_id,
-        display=False,
-        gaze_model_path=gaze_model_path,
-    )
-
-    try:
-        monitor.initialize_camera()
-    except Exception as exc:
-        placeholder = _build_placeholder_jpeg(f"Camera error: {exc}")
-        with _state_lock:
-            _state["metrics"] = {
-                "timestamp": time.time(),
-                "person_detected": False,
-                "attention_percent": None,
-                "instantaneous_percent": None,
-                "label": f"Camera error: {exc}",
-                "pose_score": None,
-                "gaze_score": None,
-                "smoothed_score": None,
-                "instantaneous_score": None,
-            }
-            _state["jpeg"] = placeholder or _state.get("jpeg")
-        return
-
-    metrics_path = os.environ.get("ATTENTION_METRICS_PATH", "attention_metrics.json")
-
-    try:
-        while _state.get("running", True):
-            ret, frame = monitor.cap.read()
-            if not ret:
-                time.sleep(0.05)
-                continue
-
-            results = monitor.process_frame(frame)
-            payload = _metrics_payload(results)
-
-            with _state_lock:
-                _state["metrics"] = payload
-
+        stale: List[WebSocket] = []
+        for connection in clients:
             try:
-                with open(metrics_path, "w", encoding="utf-8") as metrics_file:
-                    json.dump(payload, metrics_file, indent=2)
-            except OSError:
-                pass
+                await connection.send_json(message)
+            except Exception:
+                stale.append(connection)
 
-            monitor.draw_info(
-                frame,
-                results.get("bbox"),
-                results.get("head_pose_angles"),
-                results.get("gaze_vector"),
-                results.get("scores"),
-                metrics=results.get("metrics"),
-            )
-
-            ok, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            if ok:
-                with _state_lock:
-                    _state["jpeg"] = buffer.tobytes()
-    finally:
-        try:
-            monitor.cleanup()
-        except Exception:
-            pass
+        if stale:
+            async with self.lock:
+                self.active_connections = [c for c in self.active_connections if c not in stale]
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global _camera_thread
-    global _db_conn
-    _state["running"] = True
-
-    db_path = os.environ.get("ATTENTION_DB_PATH", "attention_scores.db")
-    _db_conn = _init_db(str(Path(db_path)))
-
-    enable_server_camera = os.environ.get("ENABLE_SERVER_CAMERA", "1").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-    }
-
-    if enable_server_camera:
-        gaze_default = os.environ.get("GAZE_MODEL_PATH", "l2cs_net.onnx")
-        gaze_path = gaze_default if os.path.isfile(gaze_default) else None
-        camera_id = int(os.environ.get("CAMERA_ID", "0"))
-
-        _camera_thread = threading.Thread(
-            target=_camera_loop,
-            kwargs={"camera_id": camera_id, "gaze_model_path": gaze_path},
-            daemon=True,
-            name="attention-camera",
-        )
-        _camera_thread.start()
-    else:
-        with _state_lock:
-            _state["metrics"] = {
-                "timestamp": time.time(),
-                "person_detected": False,
-                "attention_percent": None,
-                "instantaneous_percent": None,
-                "label": "Server camera disabled (distributed mode)",
-                "pose_score": None,
-                "gaze_score": None,
-                "smoothed_score": None,
-                "instantaneous_score": None,
-            }
-            if not _state.get("jpeg"):
-                _state["jpeg"] = _build_placeholder_jpeg("Server camera disabled")
-    yield
-    _state["running"] = False
-    if _camera_thread is not None:
-        _camera_thread.join(timeout=2.0)
-    if _db_conn is not None:
-        _db_conn.close()
-        _db_conn = None
-
-
-app = FastAPI(title="Attention Monitoring API", lifespan=lifespan)
+app = FastAPI(title="EngageX Realtime Score Server")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+manager = ConnectionManager()
+latest_scores: Dict[str, dict] = {}
+SCORE_TTL_SECONDS = 8.0
 
-def _mjpeg_generator():
-    boundary = b"frame"
-    idle_ticks = 0
-    while True:
-        with _state_lock:
-            jpeg = _state.get("jpeg")
-        if jpeg is None:
-            idle_ticks += 1
-            if idle_ticks >= 10:
-                placeholder = _build_placeholder_jpeg("Waiting for camera frames...")
-                if placeholder:
-                    jpeg = placeholder
-                    idle_ticks = 0
-                else:
-                    time.sleep(0.05)
-                    continue
-            else:
-                time.sleep(0.05)
-                continue
-        else:
-            idle_ticks = 0
-        if not jpeg:
-            time.sleep(0.05)
+
+def _is_participant_source(entry: dict) -> bool:
+    source = str(entry.get("source") or "").strip().lower()
+    return source in {"edge-client", "legacy-client", "participant-client"}
+
+
+def _to_legacy_user(entry: dict) -> dict:
+    return {
+        "user_id": entry["participant_id"],
+        "score": entry["attention_score"],
+        "timestamp": entry.get("timestamp", time.time()),
+        "state": "Attentive" if entry["attention_score"] >= 60 else "Distracted",
+        "pose_score": entry.get("pose_score"),
+        "gaze_score": entry.get("gaze_score"),
+        "source": entry.get("source", "compat-server"),
+    }
+
+
+def _users_snapshot() -> List[dict]:
+    return sorted(latest_scores.values(), key=lambda item: item.get("participant_id", ""))
+
+
+def _fresh_users_snapshot(participant_only: bool = True) -> List[dict]:
+    now = time.time()
+    fresh: List[dict] = []
+
+    for item in _users_snapshot():
+        if participant_only and not _is_participant_source(item):
             continue
-        yield b"--" + boundary + b"\r\n" b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
-        time.sleep(0.03)
+        ts = float(item.get("timestamp", 0.0) or 0.0)
+        if ts > now + 5:
+            ts = now
+        if now - ts <= SCORE_TTL_SECONDS:
+            fresh.append(item)
+
+    return fresh
 
 
-@app.get("/video_feed")
-def video_feed():
-    return StreamingResponse(
-        _mjpeg_generator(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-    )
+def _analytics_snapshot() -> dict:
+    users = _fresh_users_snapshot(participant_only=True)
+    now = time.time()
+    scores = [u["attention_score"] for u in users if isinstance(u.get("attention_score"), (int, float))]
+    class_average = round(sum(scores) / len(scores), 2) if scores else None
+    min_score = round(min(scores), 2) if scores else None
+    max_score = round(max(scores), 2) if scores else None
+    low_attention_users = [u["participant_id"] for u in users if u.get("attention_score", 0) < 50]
+    sanitized_timestamps: List[float] = []
+    for user in users:
+        ts = float(user.get("timestamp", 0.0) or 0.0)
+        # Clamp obviously future timestamps to avoid freezing chart updates.
+        if ts > now + 5:
+            ts = now
+        sanitized_timestamps.append(ts)
+
+    updated_at = max(sanitized_timestamps, default=now)
+
+    return {
+        "active_users": len(users),
+        "class_average": class_average,
+        "min_score": min_score,
+        "max_score": max_score,
+        "low_attention_users": low_attention_users,
+        "updated_at": updated_at,
+    }
 
 
-@app.get("/api/metrics")
-def get_metrics():
-    with _state_lock:
-        return dict(_state["metrics"])
+def _metrics_snapshot() -> dict:
+    analytics = _analytics_snapshot()
+    users = _fresh_users_snapshot(participant_only=True)
+    pose_values = [u.get("pose_score") for u in users if isinstance(u.get("pose_score"), (int, float))]
+    gaze_values = [u.get("gaze_score") for u in users if isinstance(u.get("gaze_score"), (int, float))]
+
+    attention = analytics["class_average"]
+    return {
+        "timestamp": analytics["updated_at"] or time.time(),
+        "person_detected": analytics["active_users"] > 0,
+        "attention_percent": attention,
+        "instantaneous_percent": attention,
+        "label": "Tracking" if analytics["active_users"] > 0 else "No person detected",
+        "pose_score": round(sum(pose_values) / len(pose_values), 3) if pose_values else None,
+        "gaze_score": round(sum(gaze_values) / len(gaze_values), 3) if gaze_values else None,
+        "smoothed_score": round(attention / 100, 3) if attention is not None else None,
+        "instantaneous_score": round(attention / 100, 3) if attention is not None else None,
+    }
 
 
-@app.get("/api/attention/stream")
-async def attention_sse():
-    """Server-Sent Events: push metrics about 10 times per second."""
+@app.get("/health")
+async def health() -> dict:
+    return {"status": "ok", "participants": len(_fresh_users_snapshot(participant_only=True))}
 
-    async def event_gen():
-        while True:
-            with _state_lock:
-                metrics = dict(_state["metrics"])
-            yield f"data: {json.dumps(metrics)}\n\n"
-            await asyncio.sleep(0.1)
 
-    return StreamingResponse(
-        event_gen(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+@app.post("/api/score")
+async def post_score(payload: ScorePayload) -> dict:
+    data = payload.model_dump()
+    data["pose_score"] = data.get("gaze_y")
+    data["gaze_score"] = data.get("gaze_x")
+    data["source"] = "score-api"
+    latest_scores[payload.participant_id] = data
+    await manager.broadcast(data)
+    return {"ok": True, "participant_id": payload.participant_id}
+
+
+@app.get("/api/scores")
+async def get_scores() -> dict:
+    return {"participants": _fresh_users_snapshot(participant_only=True)}
 
 
 @app.post("/api/attention/score")
-def post_attention_score(payload: AttentionScoreIn):
-    ts = float(payload.timestamp or time.time())
-    entry = {
-        "user_id": payload.user_id,
-        "score": round(float(payload.score), 2),
-        "timestamp": ts,
-        "state": payload.state,
+async def post_legacy_score(payload: LegacyAttentionScorePayload) -> dict:
+    mapped = {
+        "participant_id": payload.user_id,
+        "name": payload.user_id,
+        "attention_score": round(float(payload.score), 2),
+        "gaze_x": payload.gaze_score,
+        "gaze_y": payload.pose_score,
+        "timestamp": float(payload.timestamp or time.time()),
         "pose_score": payload.pose_score,
         "gaze_score": payload.gaze_score,
-        "source": payload.source or "client",
+        "source": payload.source or "legacy-client",
     }
 
-    with _scores_lock:
-        _latest_scores[payload.user_id] = entry
-        _recent_scores.append(entry)
-
-    _persist_score(entry)
-    snapshot = _build_aggregate_snapshot()
-    return {"ok": True, "entry": entry, "analytics": snapshot}
+    latest_scores[payload.user_id] = mapped
+    await manager.broadcast(mapped)
+    return {"ok": True, "entry": _to_legacy_user(mapped), "analytics": _analytics_snapshot()}
 
 
 @app.get("/api/attention/users")
-def get_attention_users():
-    with _scores_lock:
-        users = sorted(_latest_scores.values(), key=lambda item: item.get("user_id", ""))
+async def get_legacy_users() -> dict:
+    users = [_to_legacy_user(user) for user in _fresh_users_snapshot(participant_only=True)]
     return {"count": len(users), "users": users}
 
 
 @app.get("/api/attention/analytics")
-def get_attention_analytics():
-    return _build_aggregate_snapshot()
+async def get_legacy_analytics() -> dict:
+    return _analytics_snapshot()
 
 
-@app.get("/api/attention/history/{user_id}")
-def get_attention_history(user_id: str, limit: int = Query(default=100, ge=1, le=2000)):
-    if _db_conn is None:
-        return {"user_id": user_id, "count": 0, "history": []}
-
-    rows = _db_conn.execute(
-        """
-        SELECT user_id, score, timestamp, state, pose_score, gaze_score, source
-        FROM attention_scores
-        WHERE user_id = ?
-        ORDER BY timestamp DESC
-        LIMIT ?
-        """,
-        (user_id, limit),
-    ).fetchall()
-
-    history = [
-        {
-            "user_id": row[0],
-            "score": row[1],
-            "timestamp": row[2],
-            "state": row[3],
-            "pose_score": row[4],
-            "gaze_score": row[5],
-            "source": row[6],
-        }
-        for row in rows
-    ]
-    return {"user_id": user_id, "count": len(history), "history": history}
+@app.get("/api/metrics")
+async def get_metrics() -> dict:
+    return _metrics_snapshot()
 
 
-@app.get("/api/attention/distributed/stream")
-async def distributed_attention_sse():
-    """Server-Sent Events for distributed analytics and per-user latest scores."""
-
+@app.get("/api/attention/stream")
+async def attention_sse() -> StreamingResponse:
     async def event_gen():
         while True:
-            with _scores_lock:
-                users = sorted(_latest_scores.values(), key=lambda item: item.get("user_id", ""))
-            payload = {
-                "analytics": _build_aggregate_snapshot(),
-                "users": users,
-            }
+            payload = _metrics_snapshot()
             yield f"data: {json.dumps(payload)}\n\n"
             await asyncio.sleep(0.5)
 
@@ -469,8 +243,56 @@ async def distributed_attention_sse():
     )
 
 
-@app.get("/health")
-def health():
-    with _state_lock:
-        metrics = dict(_state["metrics"])
-    return {"status": "ok", "service": "attention-monitor", "metrics": metrics}
+@app.get("/api/attention/distributed/stream")
+async def distributed_attention_sse() -> StreamingResponse:
+    async def event_gen():
+        while True:
+            users = [_to_legacy_user(user) for user in _fresh_users_snapshot(participant_only=True)]
+            payload = {"users": users, "analytics": _analytics_snapshot()}
+            yield f"data: {json.dumps(payload)}\n\n"
+            await asyncio.sleep(0.7)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/video_feed")
+async def video_feed() -> Response:
+    # Compatibility placeholder so legacy host UI can render a feed area even
+    # when camera streaming is handled by external clients.
+    svg = """
+<svg xmlns='http://www.w3.org/2000/svg' width='1280' height='720'>
+  <rect width='100%' height='100%' fill='#0f172a'/>
+  <text x='50%' y='45%' dominant-baseline='middle' text-anchor='middle' fill='#cbd5e1' font-family='Segoe UI, sans-serif' font-size='40'>EngageX Feed</text>
+  <text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' fill='#93c5fd' font-family='Segoe UI, sans-serif' font-size='24'>Waiting for camera stream input</text>
+</svg>
+""".strip()
+    return Response(content=svg, media_type="image/svg+xml")
+
+
+@app.websocket("/ws/scores")
+async def websocket_scores(websocket: WebSocket) -> None:
+    await manager.connect(websocket)
+
+    try:
+        # Send initial snapshot so newly connected clients have immediate state.
+        await websocket.send_json({"participants": list(latest_scores.values())})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await manager.disconnect(websocket)
+    except Exception:
+        await manager.disconnect(websocket)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=True)
