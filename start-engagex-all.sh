@@ -72,20 +72,20 @@ trap cleanup INT TERM EXIT
 
 echo "Starting unified backend on http://127.0.0.1:8000"
 cd "$REPO_ROOT"
-"$PYTHON_BIN" -m uvicorn server:app --host 127.0.0.1 --port 8000 --reload &
+"$PYTHON_BIN" -m uvicorn backend.server:app --host 127.0.0.1 --port 8000 --reload &
 BACKEND_PID=$!
 
 if [[ "$WITH_PARTICIPANT" == "true" ]]; then
   if [[ "$WITH_VIRTUAL_CAM" == "true" ]]; then
     echo "Starting participant virtual camera client (user=$USER_ID, camera=$CAMERA_ID)"
-    "$PYTHON_BIN" "$REPO_ROOT/attention-monitor/client-desktop/run_virtual_cam.py" \
+    "$PYTHON_BIN" -m clients.desktop.run_virtual_cam \
       --camera-id "$CAMERA_ID" \
       --backend-url http://127.0.0.1:8000 \
       --user-id "$USER_ID" \
       --show-preview &
   else
     echo "Starting participant score client (user=$USER_ID, camera=$CAMERA_ID)"
-    "$PYTHON_BIN" "$REPO_ROOT/distributed_client.py" \
+    "$PYTHON_BIN" -m clients.distributed_client \
       --user-id "$USER_ID" \
       --server-url http://127.0.0.1:8000 \
       --camera-id "$CAMERA_ID" \
