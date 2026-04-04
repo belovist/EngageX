@@ -32,12 +32,13 @@ YOLOv8 will auto-download on first run. For gaze tracking:
    python scripts/export_l2cs_to_onnx.py
    ```
 
-4. Move the generated `l2cs_net.onnx` to this `models/` directory
+4. The script exports directly to `models/l2cs_net.onnx`
 
 ### Option B: Head-pose only mode
 If gaze model is unavailable, the system falls back to head-pose-only scoring.
 No additional setup required.
 
 ## Notes
+- `L2CS-Net/` is an external optional repository and is ignored by git in this project
 - Model files are excluded from git via `.gitignore`
 - The system gracefully degrades if models are missing

@@ -17,7 +17,7 @@
 When Python inference owns the physical webcam, browser preview or meeting apps cannot reliably open the same device at the same time.
 
 - Score-only mode: use `distributed_client.py`.
-- Meeting-compatible mode: use `attention-monitor/client-desktop/run_virtual_cam.py` and select virtual camera in Zoom/Meet/Teams.
+- Meeting-compatible mode: use `clients/desktop/run_virtual_cam.py` and select virtual camera in Zoom/Meet/Teams.
 
 OBS is optional as a product dependency, but a virtual camera layer is required if one app owns the physical camera and another app (meeting client) needs video input.
 

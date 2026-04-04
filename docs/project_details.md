@@ -96,6 +96,6 @@ Compatibility aliases:
 
 If inference and meeting video are both needed on the same machine:
 
-- Use virtual camera pipeline (`attention-monitor/client-desktop/run_virtual_cam.py`).
+- Use virtual camera pipeline (`clients/desktop/run_virtual_cam.py`).
 - Select virtual camera in Zoom/Meet/Teams.
 - OBS is optional as a product dependency, but a virtual camera layer is required for simultaneous inference and meeting-video publishing.

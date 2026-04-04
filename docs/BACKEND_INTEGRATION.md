@@ -107,6 +107,6 @@ Conflict rule:
 
 Meeting-app compatible path:
 
-- Use `attention-monitor/client-desktop/run_virtual_cam.py`.
+- Use `clients/desktop/run_virtual_cam.py`.
 - Select virtual camera in Zoom/Meet/Teams.
 - OBS is optional as a product dependency, but a virtual camera layer is required for simultaneous inference + meeting video.
