@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
+PYTHON_BIN=""
 USER_ID="student-1"
 CAMERA_ID="0"
 WITH_PARTICIPANT="false"
@@ -52,9 +52,22 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -x "$PYTHON_BIN" ]]; then
-  echo "Python venv not found at $PYTHON_BIN" >&2
-  echo "Run: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt" >&2
+if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+  PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
+elif [[ -x "$REPO_ROOT/venv/bin/python" ]]; then
+  PYTHON_BIN="$REPO_ROOT/venv/bin/python"
+fi
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "Python virtual environment not found." >&2
+  echo "Expected one of:" >&2
+  echo "  $REPO_ROOT/.venv/bin/python" >&2
+  echo "  $REPO_ROOT/venv/bin/python" >&2
+  echo "Setup steps:" >&2
+  echo "  cd \"$REPO_ROOT\"" >&2
+  echo "  python3 -m venv .venv    # or: python3 -m venv venv" >&2
+  echo "  source .venv/bin/activate # or: source venv/bin/activate" >&2
+  echo "  pip install -r requirements.txt" >&2
   exit 1
 fi
 

@@ -11,9 +11,9 @@ Usage (from the project root):
    - Place it at: L2CS-Net/models/L2CSNet_gaze360.pkl
 
 3. Run this script:
-   - python export_l2cs_to_onnx.py
+   - python scripts/export_l2cs_to_onnx.py
 
-4. This will create: l2cs_net.onnx in the project root.
+4. This will create: models/l2cs_net.onnx
    - After that, gaze_tracker.py will automatically pick it up.
 """
 
@@ -26,7 +26,8 @@ import torchvision
 
 
 def main():
-    project_root = Path(__file__).resolve().parent
+    scripts_dir = Path(__file__).resolve().parent
+    project_root = scripts_dir.parent
 
     # Path to L2CS-Net repo and weights
     l2cs_repo = project_root / "L2CS-Net"
@@ -81,7 +82,9 @@ def main():
     # Dummy input: 1 x 3 x 224 x 224 (same as gaze_tracker.py expects)
     dummy_input = torch.randn(1, 3, 224, 224, dtype=torch.float32)
 
-    onnx_path = project_root / "l2cs_net.onnx"
+    models_dir = project_root / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    onnx_path = models_dir / "l2cs_net.onnx"
     print(f"Exporting model to ONNX at {onnx_path}...")
 
     torch.onnx.export(

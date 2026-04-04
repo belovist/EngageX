@@ -87,6 +87,8 @@ chmod +x ./start-engagex-all.sh
 ./start-engagex-all.sh
 ```
 
+The launcher supports both `.venv` and `venv` virtual environments and prefers `.venv` when both exist.
+
 ### Option B: Manual Setup
 
 #### 1. Create and activate virtual environment
@@ -184,7 +186,8 @@ python -m clients.desktop.run_virtual_cam --camera-id 0 --show-preview
 See `models/README.md` for detailed instructions.
 
 - **YOLOv8 Nano**: Auto-downloaded on first run
-- **L2CS-Net ONNX**: Must be exported manually (optional - system degrades gracefully)
+- **L2CS-Net ONNX**: Must be exported manually from an external optional `L2CS-Net/` clone (ignored by git)
+- If the gaze model is missing, EngageX runs in head-pose-only mode
 
 ## Environment Variables
 

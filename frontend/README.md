@@ -1,5 +1,10 @@
 # Frontend Dashboard
 
+## Baseline Environment
+
+- Node.js: 20+ (current LTS recommended)
+- npm: 10+
+
 ## Development
 
 ```bash
@@ -8,6 +13,11 @@ npm run dev
 ```
 
 Open `http://127.0.0.1:3000`.
+
+### npm install / audit note
+
+`npm install` can complete successfully even when audit warnings are shown.
+`npm audit` returning a non-zero exit code indicates known vulnerabilities, not a failed install.
 
 By default the dev server proxies:
 
@@ -54,4 +64,12 @@ Set it only if the backend is hosted elsewhere:
 
 ```bash
 VITE_API_URL=http://127.0.0.1:8000
+```
+
+## Troubleshooting: clean reinstall
+
+```bash
+rm -rf node_modules package-lock.json
+npm install
+npm run dev
 ```

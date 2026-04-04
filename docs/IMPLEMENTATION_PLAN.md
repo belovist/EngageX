@@ -50,7 +50,7 @@ macOS/Linux with participant client:
 - Captures webcam locally and sends score events to backend `:8000`
 
 2. Meeting-compatible mode
-- Runs `attention-monitor/client-desktop/run_virtual_cam.py`
+- Runs `clients/desktop/run_virtual_cam.py`
 - Captures webcam, runs inference, sends scores, and publishes frames to a virtual camera device
 - Meeting apps should select the virtual camera device
 

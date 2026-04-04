@@ -68,7 +68,7 @@ export function ParticipantApp() {
   const participantCommand = useMemo(() => {
     const escapedUser = userId.trim() || 'student-01';
     const escapedBackend = backendUrl.trim() || 'http://127.0.0.1:8000';
-    return `python attention-monitor/client-desktop/run_virtual_cam.py --user-id ${escapedUser} --backend-url ${escapedBackend}`;
+    return `python clients/desktop/run_virtual_cam.py --user-id ${escapedUser} --backend-url ${escapedBackend}`;
   }, [userId, backendUrl]);
 
   async function checkBackend() {
