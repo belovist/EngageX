@@ -3,13 +3,31 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 USER_ID="student-1"
 CAMERA_ID="1"
 
-# Find python
+# Find or create python venv
 if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
   PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
 elif [[ -x "$REPO_ROOT/venv/bin/python" ]]; then
   PYTHON_BIN="$REPO_ROOT/venv/bin/python"
 else
-  echo "No venv found!" && exit 1
+  echo "No venv found, creating one..."
+  python3 -m venv "$REPO_ROOT/.venv"
+  "$REPO_ROOT/.venv/bin/pip" install --upgrade pip
+  "$REPO_ROOT/.venv/bin/pip" install -r "$REPO_ROOT/requirements.txt"
+  PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
+  echo "✅ venv created and dependencies installed"
+fi
+
+# Check models
+if [[ ! -f "$REPO_ROOT/models/l2cs_net.onnx" ]]; then
+  echo "Model not found, running setup_models.py..."
+  "$PYTHON_BIN" "$REPO_ROOT/setup_models.py"
+fi
+
+# Check frontend dependencies
+if [[ ! -d "$REPO_ROOT/frontend/node_modules" ]]; then
+  echo "Installing frontend dependencies..."
+  cd "$REPO_ROOT/frontend"
+  npm install
 fi
 
 cleanup() {
@@ -25,13 +43,13 @@ cd "$REPO_ROOT"
 "$PYTHON_BIN" -m uvicorn backend.server:app --host 127.0.0.1 --port 8000 --reload &
 BACKEND_PID=$!
 
-# 2. Start Vite only (no auto-open)
+# 2. Start Vite
 echo "Starting Vite..."
 cd "$REPO_ROOT/frontend"
 npx vite --host 127.0.0.1 --port 3000 &
 VITE_PID=$!
 
-# 3. Wait for Vite to be ready
+# 3. Wait for Vite
 echo "Waiting for Vite..."
 sleep 6
 
@@ -52,5 +70,5 @@ cd "$REPO_ROOT"
   --interval 1.5 &
 CLIENT_PID=$!
 
-echo "All services running! Press Ctrl+C to stop everything."
+echo "✅ All services running! Press Ctrl+C to stop everything."
 wait
