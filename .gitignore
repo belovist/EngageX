@@ -83,3 +83,4 @@ L2CS-Net/
 
 # Old/unused directories
 Info/
+*.pkl

@@ -3,18 +3,7 @@ One-time script to export the L2CS-Net PyTorch model to ONNX for use in gaze_tra
 
 Usage (from the project root):
 
-1. Install dependencies in your environment (inside your virtualenv, e.g. mp_env):
-   - pip install torch torchvision
-
-2. Download the pretrained L2CS-Net weights:
-   - From the L2CS-Net README link, download `L2CSNet_gaze360.pkl`
-   - Place it at: L2CS-Net/models/L2CSNet_gaze360.pkl
-
-3. Run this script:
-   - python scripts/export_l2cs_to_onnx.py
-
-4. This will create: models/l2cs_net.onnx
-   - After that, gaze_tracker.py will automatically pick it up.
+1. cd ~/Downloads/EngageX/EngageX
 """
 
 import os

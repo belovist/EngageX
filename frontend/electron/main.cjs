@@ -1,44 +1,50 @@
-const { app, BrowserWindow } = require('electron');
-const path = require('path');
+const { app, BrowserWindow } = require('electron')
+const path = require('path')
+const http = require('http')
 
-function createMainWindow() {
-  const win = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1100,
-    minHeight: 700,
-    autoHideMenuBar: true,
-    backgroundColor: '#0f172a',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
+let mainWindow
 
-  const devUrl = process.env.ELECTRON_START_URL;
-  if (devUrl) {
-    win.loadURL(devUrl);
-    win.webContents.openDevTools({ mode: 'detach' });
-    return;
-  }
-
-  win.loadFile(path.join(__dirname, '..', 'build', 'index.html'));
+function waitForVite(retries = 20, delay = 1000) {
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      http.get('http://127.0.0.1:3000', (res) => {
+        if (res.statusCode === 200) resolve()
+        else setTimeout(attempt, delay)
+      }).on('error', () => {
+        if (retries-- > 0) setTimeout(attempt, delay)
+        else reject(new Error('Vite not ready'))
+      })
+    }
+    attempt()
+  })
 }
 
-app.whenReady().then(() => {
-  createMainWindow();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow();
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      nodeIntegration: false,
+      contextIsolation: true
     }
-  });
-});
+  })
+
+  // Always load home page so user can choose role
+  mainWindow.loadURL('http://127.0.0.1:3000/')
+}
+
+app.whenReady().then(async () => {
+  console.log('Waiting for Vite...')
+  try {
+    await waitForVite()
+    console.log('Vite ready!')
+  } catch (e) {
+    console.error('Vite not ready, opening anyway...')
+  }
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
+  if (process.platform !== 'darwin') app.quit()
+})
