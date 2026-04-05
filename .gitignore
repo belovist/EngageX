@@ -49,6 +49,7 @@ frontend/release/
 *.weights
 *.h5
 *.pb
+*.npz
 # But keep model README
 !models/README.md
 !models/.gitkeep
