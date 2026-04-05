@@ -3,9 +3,9 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import "./index.css";
 
+import App from "./App";
 import Home from "./Home";
 import ParticipantApp from "./apps/participant/ParticipantApp";
-import HostApp from "./apps/host/HostApp";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -13,7 +13,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/participant" element={<ParticipantApp />} />
-        <Route path="/host" element={<HostApp />} />
+        <Route path="/host" element={<App />} />
       </Routes>
     </BrowserRouter>
   </React.StrictMode>

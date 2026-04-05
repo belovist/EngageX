@@ -21,7 +21,7 @@ _DEFAULT_MODEL_PATH = _PROJECT_ROOT / "models" / "yolov8n.pt"
 class Gatekeeper:
     """YOLOv8 Nano-based person detection and ROI cropping."""
 
-    def __init__(self, model_path=None, confidence_threshold=0.5):
+    def __init__(self, model_path=None, confidence_threshold=0.25):
         # Resolve model path - check models/ directory first
         if model_path is None:
             model_path = str(_DEFAULT_MODEL_PATH) if _DEFAULT_MODEL_PATH.exists() else "yolov8n.pt"

@@ -1,6 +1,7 @@
 $REPO_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $USER_ID = "student-1"
 $CAMERA_ID = "0"
+$FACE_LANDMARKER_TASK = "$REPO_ROOT\models\face_landmarker.task"
 
 Write-Host "Starting EngageX..." -ForegroundColor Cyan
 
@@ -34,16 +35,16 @@ if (-Not (Test-Path "$REPO_ROOT\frontend\node_modules")) {
 }
 
 # Download and convert model if missing
-if (-Not (Test-Path "$REPO_ROOT\models\l2cs_net.onnx")) {
+if ((-Not (Test-Path "$REPO_ROOT\models\l2cs_net.onnx")) -or (-Not (Test-Path $FACE_LANDMARKER_TASK))) {
     Write-Host "Model not found, running setup..." -ForegroundColor Yellow
     & $PYTHON_BIN "$REPO_ROOT\setup_models.py"
-    if (-Not (Test-Path "$REPO_ROOT\models\l2cs_net.onnx")) {
+    if ((-Not (Test-Path "$REPO_ROOT\models\l2cs_net.onnx")) -or (-Not (Test-Path $FACE_LANDMARKER_TASK))) {
         Write-Host "ERROR: Model setup failed. Please run 'python setup_models.py' manually." -ForegroundColor Red
         pause
         exit 1
     }
-    Write-Host "Model ready" -ForegroundColor Green
 }
+Write-Host "Models ready" -ForegroundColor Green
 
 # Kill anything on ports 3000 and 8000
 Write-Host "Clearing ports..." -ForegroundColor Yellow
@@ -98,6 +99,35 @@ Write-Host "Starting attention client..." -ForegroundColor Green
 $CLIENT = Start-Process -PassThru -NoNewWindow -FilePath $PYTHON_BIN `
     -ArgumentList "-m clients.distributed_client --user-id $USER_ID --server-url http://127.0.0.1:8000 --camera-id $CAMERA_ID --interval 1.5" `
     -WorkingDirectory $REPO_ROOT
+
+Write-Host "Validating live stack..." -ForegroundColor Yellow
+$stackReady = $false
+$maxWait = 40
+$waited = 0
+while ($waited -lt $maxWait) {
+    try {
+        $health = Invoke-WebRequest -Uri "http://127.0.0.1:8000/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop | Select-Object -ExpandProperty Content | ConvertFrom-Json
+        $scores = Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/scores" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop | Select-Object -ExpandProperty Content | ConvertFrom-Json
+
+        if ($health.status -eq "ok" -and $health.video_feed_live -and $scores.participants.Count -gt 0) {
+            $stackReady = $true
+            break
+        }
+    } catch {}
+    Start-Sleep -Seconds 1
+    $waited++
+}
+
+if (-Not $stackReady) {
+    Write-Host "ERROR: Backend, frontend, and live model feed did not all become ready." -ForegroundColor Red
+    Write-Host "Make sure the camera is free and the participant client can stream frames." -ForegroundColor Red
+    Stop-Process -Id $BACKEND.Id -Force -ErrorAction SilentlyContinue
+    Stop-Process -Id $VITE.Id -Force -ErrorAction SilentlyContinue
+    Stop-Process -Id $ELECTRON.Id -Force -ErrorAction SilentlyContinue
+    Stop-Process -Id $CLIENT.Id -Force -ErrorAction SilentlyContinue
+    pause
+    exit 1
+}
 
 Write-Host ""
 Write-Host "EngageX is running!" -ForegroundColor Cyan
