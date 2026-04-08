@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import json
 import sqlite3
 import threading
@@ -9,9 +11,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List
 
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
+from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field
 
 
@@ -29,8 +32,16 @@ class LegacyAttentionScorePayload(BaseModel):
     score: float = Field(..., ge=0, le=100)
     timestamp: float | None = None
     state: str | None = Field(default=None, max_length=64)
+    person_detected: bool | None = None
     pose_score: float | None = Field(default=None, ge=0, le=1)
     gaze_score: float | None = Field(default=None, ge=0, le=1)
+    source: str | None = Field(default="client")
+
+
+class FramePayload(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=128)
+    jpeg_base64: str = Field(..., min_length=32)
+    timestamp: float = Field(default_factory=lambda: time.time())
     source: str | None = Field(default="client")
 
 
@@ -193,6 +204,26 @@ app.add_middleware(
 manager = ConnectionManager()
 latest_scores: Dict[str, dict] = {}
 SCORE_TTL_SECONDS = 8.0
+VIDEO_TTL_SECONDS = 5.0
+frame_lock = threading.Lock()
+latest_frame: Dict[str, object] = {
+    "jpeg_bytes": None,
+    "timestamp": 0.0,
+    "user_id": None,
+}
+
+
+def _placeholder_frame_bytes() -> bytes:
+    image = Image.new("RGB", (1280, 720), color=(15, 23, 42))
+    draw = ImageDraw.Draw(image)
+    draw.text((480, 320), "EngageX Feed", fill=(203, 213, 225))
+    draw.text((380, 370), "Waiting for live camera frames", fill=(147, 197, 253))
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=85)
+    return buffer.getvalue()
+
+
+PLACEHOLDER_FRAME_BYTES = _placeholder_frame_bytes()
 
 
 def _is_participant_source(entry: dict) -> bool:
@@ -206,6 +237,7 @@ def _to_legacy_user(entry: dict) -> dict:
         "score": entry["attention_score"],
         "timestamp": entry.get("timestamp", time.time()),
         "state": "Attentive" if entry["attention_score"] >= 60 else "Distracted",
+        "person_detected": entry.get("person_detected"),
         "pose_score": entry.get("pose_score"),
         "gaze_score": entry.get("gaze_score"),
         "source": entry.get("source", "compat-server"),
@@ -293,21 +325,39 @@ def _build_analytics_from_legacy(users: list[dict]) -> dict:
 def _metrics_snapshot() -> dict:
     analytics = _analytics_snapshot()
     users = _fresh_users_snapshot(participant_only=True)
+    latest_user = max(users, key=lambda user: float(user.get("timestamp", 0.0) or 0.0), default=None)
     pose_values = [u.get("pose_score") for u in users if isinstance(u.get("pose_score"), (int, float))]
     gaze_values = [u.get("gaze_score") for u in users if isinstance(u.get("gaze_score"), (int, float))]
+    person_detected = any(bool(u.get("person_detected")) for u in users)
 
     attention = analytics["class_average"]
     return {
         "timestamp": analytics["updated_at"] or time.time(),
-        "person_detected": analytics["active_users"] > 0,
+        "person_detected": person_detected,
         "attention_percent": attention,
         "instantaneous_percent": attention,
-        "label": "Tracking" if analytics["active_users"] > 0 else "No person detected",
+        "label": (latest_user or {}).get("state") or ("Tracking" if person_detected else "No person detected"),
         "pose_score": round(sum(pose_values) / len(pose_values), 3) if pose_values else None,
         "gaze_score": round(sum(gaze_values) / len(gaze_values), 3) if gaze_values else None,
         "smoothed_score": round(attention / 100, 3) if attention is not None else None,
         "instantaneous_score": round(attention / 100, 3) if attention is not None else None,
     }
+
+
+def _video_feed_live() -> bool:
+    with frame_lock:
+        ts = float(latest_frame.get("timestamp", 0.0) or 0.0)
+        jpeg_bytes = latest_frame.get("jpeg_bytes")
+    return bool(jpeg_bytes) and (time.time() - ts) <= VIDEO_TTL_SECONDS
+
+
+def _current_frame_bytes() -> bytes:
+    with frame_lock:
+        jpeg_bytes = latest_frame.get("jpeg_bytes")
+        ts = float(latest_frame.get("timestamp", 0.0) or 0.0)
+    if jpeg_bytes and (time.time() - ts) <= VIDEO_TTL_SECONDS:
+        return jpeg_bytes  # type: ignore[return-value]
+    return PLACEHOLDER_FRAME_BYTES
 
 
 @app.get("/health")
@@ -316,6 +366,7 @@ async def health() -> dict:
         "status": "ok",
         "service": "engagex-unified-backend",
         "participants": len(_fresh_users_snapshot(participant_only=True)),
+        "video_feed_live": _video_feed_live(),
     }
 
 
@@ -345,6 +396,8 @@ async def post_legacy_score(payload: LegacyAttentionScorePayload) -> dict:
         "gaze_x": payload.gaze_score,
         "gaze_y": payload.pose_score,
         "timestamp": float(payload.timestamp or time.time()),
+        "state": payload.state,
+        "person_detected": bool(payload.person_detected),
         "pose_score": payload.pose_score,
         "gaze_score": payload.gaze_score,
         "source": payload.source or "legacy-client",
@@ -359,6 +412,24 @@ async def post_legacy_score(payload: LegacyAttentionScorePayload) -> dict:
 @app.post("/attention_score")
 async def post_attention_score_compat(payload: LegacyAttentionScorePayload) -> dict:
     return await post_legacy_score(payload)
+
+
+@app.post("/api/attention/frame")
+async def post_attention_frame(payload: FramePayload) -> dict:
+    try:
+        jpeg_bytes = base64.b64decode(payload.jpeg_base64, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid jpeg_base64 payload: {exc}") from exc
+
+    if len(jpeg_bytes) < 256:
+        raise HTTPException(status_code=400, detail="Frame payload is too small to be a valid JPEG")
+
+    with frame_lock:
+        latest_frame["jpeg_bytes"] = jpeg_bytes
+        latest_frame["timestamp"] = float(payload.timestamp or time.time())
+        latest_frame["user_id"] = payload.user_id
+
+    return {"ok": True, "user_id": payload.user_id}
 
 
 @app.get("/api/attention/users")
@@ -452,17 +523,28 @@ async def distributed_attention_sse_persistent() -> StreamingResponse:
 
 
 @app.get("/video_feed")
-async def video_feed() -> Response:
-    # Compatibility placeholder so legacy host UI can render a feed area even
-    # when camera streaming is handled by external clients.
-    svg = """
-<svg xmlns='http://www.w3.org/2000/svg' width='1280' height='720'>
-  <rect width='100%' height='100%' fill='#0f172a'/>
-  <text x='50%' y='45%' dominant-baseline='middle' text-anchor='middle' fill='#cbd5e1' font-family='Segoe UI, sans-serif' font-size='40'>EngageX Feed</text>
-  <text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' fill='#93c5fd' font-family='Segoe UI, sans-serif' font-size='24'>Waiting for camera stream input</text>
-</svg>
-""".strip()
-    return Response(content=svg, media_type="image/svg+xml")
+async def video_feed() -> StreamingResponse:
+    async def event_gen():
+        while True:
+            frame = _current_frame_bytes()
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                + f"Content-Length: {len(frame)}\r\n\r\n".encode("ascii")
+                + frame
+                + b"\r\n"
+            )
+            await asyncio.sleep(0.2)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.websocket("/ws/scores")

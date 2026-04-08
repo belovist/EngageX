@@ -44,33 +44,47 @@ class AttentionMonitor:
 
     def initialize_camera(self):
         """Initialize webcam capture with Windows-friendly fallbacks."""
-        candidates = [cv2.VideoCapture(self.camera_id)]
-
-        for backend in (cv2.CAP_DSHOW, cv2.CAP_MSMF):
-            candidates.append(cv2.VideoCapture(self.camera_id, backend))
+        candidate_ids = []
+        for cam_id in [self.camera_id, 0, 1, 2, 3]:
+            if cam_id not in candidate_ids:
+                candidate_ids.append(cam_id)
 
         selected_cap = None
-        for cap in candidates:
-            if cap is not None and cap.isOpened():
-                # Some backends report opened but do not actually yield frames.
-                readable = False
-                for _ in range(5):
-                    ok, _frame = cap.read()
-                    if ok:
-                        readable = True
+        selected_camera_id = None
+
+        for candidate_id in candidate_ids:
+            candidates = [cv2.VideoCapture(candidate_id)]
+            for backend in (cv2.CAP_DSHOW, cv2.CAP_MSMF):
+                candidates.append(cv2.VideoCapture(candidate_id, backend))
+
+            for cap in candidates:
+                if cap is not None and cap.isOpened():
+                    # Some backends report opened but do not actually yield frames.
+                    readable = False
+                    for _ in range(5):
+                        ok, _frame = cap.read()
+                        if ok:
+                            readable = True
+                            break
+                    if readable:
+                        selected_cap = cap
+                        selected_camera_id = candidate_id
                         break
-                if readable:
-                    selected_cap = cap
-                    break
-            if cap is not None:
-                cap.release()
+
+                if cap is not None:
+                    cap.release()
+
+            if selected_cap is not None:
+                break
 
         if selected_cap is None:
-            raise RuntimeError(f"Failed to open camera {self.camera_id}")
+            raise RuntimeError(f"Failed to open camera {self.camera_id} or nearby camera indices")
 
         self.cap = selected_cap
+        self.camera_id = selected_camera_id if selected_camera_id is not None else self.camera_id
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        print(f"Camera initialized on index {self.camera_id}")
 
     def draw_info(self, frame, bbox, head_pose_angles, gaze_vector, scores, metrics=None):
         h, w = frame.shape[:2]
@@ -173,6 +187,7 @@ class AttentionMonitor:
                 "gaze_vector": None,
                 "scores": (None, last_smooth),
                 "metrics": {
+                    "person_detected": False,
                     "instantaneous_score": None,
                     "smoothed_score": last_smooth,
                     "instantaneous_percent": None,
@@ -205,6 +220,7 @@ class AttentionMonitor:
             gaze_vector=gaze_vector,
             emotion=None,
         )
+        metrics["person_detected"] = True
         instantaneous_score = metrics["instantaneous_score"]
         smoothed_score = metrics["smoothed_score"]
 

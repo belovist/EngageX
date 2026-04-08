@@ -1,83 +1,141 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Sidebar } from "../../components/ui/sidebar";
+import { SidebarProvider } from "../../components/ui/sidebar";
 
-import { LOW_ENGAGEMENT_THRESHOLD } from "../../shared/constants";
-import { AttentionHeatmap } from "./components/AttentionHeatmap";
-import { AlertBanner } from "./components/AlertBanner";
-import { OBSControls } from "./components/OBSControls";
-import { ScoreDashboard } from "./components/ScoreDashboard";
+import { SessionHeader } from "../../components/SessionHeader";
+import { StatisticsCards } from "../../components/StatisticsCards";
+import { UserGrid } from "../../components/UserGrid";
+import { AlertPanel } from "../../components/AlertPanel";
+import { AttentionChart } from "../../components/AttentionChart";
+import { SearchBar } from "../../components/SearchBar";
+import { ProgressBar } from "../../components/ProgressBar";
+import { StatusIndicator } from "../../components/StatusIndicator";
+import { TrendIndicator } from "../../components/TrendIndicator";
+
 import { useAttentionScores } from "./hooks/useAttentionScores";
-import { useOBSWebSocket } from "./hooks/useOBSWebSocket";
 
 export default function HostApp() {
-  const { participants, connected: scoreConnected } = useAttentionScores();
-  const {
-    connected: obsConnected,
-    scenes,
-    switchScene,
-    setSceneItemVisible,
-    alertAll,
-  } = useOBSWebSocket();
+  const { participants } = useAttentionScores();
 
-  const participantList = useMemo(() => Object.values(participants), [participants]);
-  const classAverage = useMemo(() => {
-    if (!participantList.length) {
-      return 0;
-    }
-    const sum = participantList.reduce((acc, item) => acc + item.attention_score, 0);
-    return Math.round((sum / participantList.length) * 10) / 10;
-  }, [participantList]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [alerts, setAlerts] = useState([
+    {
+      id: "1",
+      type: "info",
+      title: "Attention stream connected",
+      message: "Live attention data is now available.",
+      timestamp: "Just now",
+    },
+  ]);
 
-  const lowAttentionCount = participantList.filter((p) => p.attention_score < LOW_ENGAGEMENT_THRESHOLD).length;
-  const showAlert = lowAttentionCount > 0;
+  const participantList = Object.values(participants);
 
-  const heatmapPoints = participantList
-    .map((participant) => ({ x: participant.gaze_x ?? 0.5, y: participant.gaze_y ?? 0.5 }))
-    .slice(-200);
+  // Map backend → UI
+  const users = participantList.map((p: any) => ({
+    id: p.participant_id,
+    name: p.name || p.participant_id,
+    status: p.attention_score > 40 ? "Active" : "Idle",
+    score: p.attention_score,
+  }));
+
+  const filteredUsers = useMemo(
+    () =>
+      users.filter((user) =>
+        user.name.toLowerCase().includes(searchQuery.toLowerCase())
+      ),
+    [searchQuery, users]
+  );
+
+  const sessionData = {
+    sessionId: "session-123",
+    totalParticipants: participantList.length,
+    averageScore:
+      participantList.length > 0
+        ? Math.round(
+            (participantList.reduce((sum: any, p: any) => sum + p.attention_score, 0) /
+              participantList.length) * 10
+          ) / 10
+        : 0,
+    duration: "00:30:00",
+    statusLabel: participantList.length > 0 ? "Live" : "Offline",
+    statusTone: (participantList.length > 0 ? "live" : "offline") as "live" | "offline",
+    sourceLabel: "WebRTC",
+    lastUpdatedLabel: "Just now",
+  };
+
+  const stats = [
+    {
+      label: "Participants",
+      value: participantList.length,
+      valueClass: "text-blue-300",
+      icon: null,
+    },
+    {
+      label: "Average Attention",
+      value: sessionData.averageScore,
+      valueClass: "text-green-300",
+      icon: null,
+    },
+  ];
+
+  const trendValue = participantList.length > 1
+    ? Math.round(
+        ((participantList[participantList.length - 1].attention_score - participantList[0].attention_score) /
+          (participantList[0].attention_score || 1)) * 100
+      )
+    : 0;
+
+  // Chart data (demo for now)
+  const chartData = [
+    { time: "00:00", score: 50 },
+    { time: "00:05", score: 60 },
+    { time: "00:10", score: 70 },
+    { time: "00:15", score: 65 },
+    { time: "00:20", score: 80 },
+    { time: "00:25", score: 75 },
+    { time: "00:30", score: 85 },
+  ];
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <header className="mb-6 rounded-2xl border border-slate-800 bg-gradient-to-r from-slate-900 via-slate-900 to-cyan-950/35 p-6">
-          <p className="text-xs uppercase tracking-[0.22em] text-cyan-300">EngageX Host Dashboard</p>
-          <h1 className="mt-2 text-3xl font-semibold">Live Engagement Command Center</h1>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-3">
-              <p className="text-xs text-slate-400">Score Stream</p>
-              <p className={`text-sm font-semibold ${scoreConnected ? "text-emerald-300" : "text-amber-300"}`}>
-                {scoreConnected ? "Connected" : "Polling fallback"}
-              </p>
-            </div>
-            <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-3">
-              <p className="text-xs text-slate-400">Participants</p>
-              <p className="text-sm font-semibold text-slate-100">{participantList.length}</p>
-            </div>
-            <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-3">
-              <p className="text-xs text-slate-400">Class Average</p>
-              <p className="text-sm font-semibold text-cyan-200">{classAverage}%</p>
-            </div>
-          </div>
-        </header>
+    <SidebarProvider>
+      <div className="flex h-screen w-screen bg-slate-950 text-white">
+        
+        {/* Sidebar */}
+        <Sidebar />
 
-        <div className="mb-4">
-          <AlertBanner
-            visible={showAlert}
-            message={`${lowAttentionCount} participant(s) are below ${LOW_ENGAGEMENT_THRESHOLD}% attention. Consider switching to an engagement-focused scene.`}
+        {/* Main Content */}
+        <div className="flex-1 w-full p-6 space-y-6 overflow-auto">
+          
+          {/* Header */}
+          <SessionHeader data={sessionData} />
+          <StatusIndicator status={sessionData.statusLabel} />
+
+          {/* Stats */}
+          <StatisticsCards stats={stats} />
+          <TrendIndicator value={trendValue} label="trend" />
+
+          {/* Progress */}
+          <ProgressBar value={75} label="Attention Progress" />
+
+          {/* Chart */}
+          <AttentionChart data={chartData} />
+
+          {/* Alerts */}
+          <AlertPanel
+            alerts={alerts}
+            onDismiss={(id: string) =>
+              setAlerts((current) => current.filter((alert) => alert.id !== id))
+            }
           />
-        </div>
 
-        <div className="mb-6 grid gap-4 lg:grid-cols-[2fr_1fr]">
-          <AttentionHeatmap points={heatmapPoints} />
-          <OBSControls
-            connected={obsConnected}
-            scenes={scenes}
-            onSwitchScene={switchScene}
-            onToggleOverlay={setSceneItemVisible}
-            onAlertAll={alertAll}
-          />
-        </div>
+          {/* Search */}
+          <SearchBar onSearch={setSearchQuery} />
 
-        <ScoreDashboard participants={participants} />
+          {/* Users */}
+          <UserGrid users={filteredUsers} />
+
+        </div>
       </div>
-    </main>
+    </SidebarProvider>
   );
 }

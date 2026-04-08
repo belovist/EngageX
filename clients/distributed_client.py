@@ -10,6 +10,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -18,6 +19,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+import cv2
 
 # Add project root to path for imports
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -43,7 +46,9 @@ def post_json(url: str, payload: Dict[str, Any], timeout: float = 5.0) -> bool:
         return False
 
 
-def build_payload(user_id: str, metrics: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def build_payload(user_id: str, results: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    metrics = results.get("metrics") or {}
+    person_detected = bool(results.get("person_detected"))
     score = metrics.get("attention_percent")
     if not isinstance(score, (int, float)):
         score = 0.0
@@ -52,11 +57,27 @@ def build_payload(user_id: str, metrics: Dict[str, Any]) -> Optional[Dict[str, A
         "user_id": user_id,
         "score": float(score),
         "timestamp": time.time(),
-        "state": metrics.get("label") or "No person detected",
+        "state": metrics.get("label") or ("Tracking" if person_detected else "No person detected"),
+        "person_detected": person_detected,
         "pose_score": metrics.get("pose_score"),
         "gaze_score": metrics.get("gaze_score"),
         "source": "edge-client",
     }
+
+
+def post_frame(base_url: str, user_id: str, frame: Any, timestamp: float, timeout: float = 5.0) -> bool:
+    ok, encoded = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+    if not ok:
+        return False
+
+    payload = {
+        "user_id": user_id,
+        "jpeg_base64": base64.b64encode(encoded.tobytes()).decode("ascii"),
+        "timestamp": timestamp,
+        "source": "edge-client",
+    }
+    endpoint = f"{base_url.rstrip('/')}/api/attention/frame"
+    return post_json(endpoint, payload, timeout=timeout)
 
 
 def run_client(
@@ -73,11 +94,11 @@ def run_client(
         gaze_model_path=gaze_model_path,
         display=display,
     )
-    monitor.initialize_camera()
 
     last_sent = 0.0
     sent_count = 0
     fail_count = 0
+    last_camera_retry = 0.0
 
     print(f"Starting distributed client for user_id={user_id}")
     print(f"Posting scores to {endpoint} every {interval_sec:.1f}s")
@@ -85,8 +106,20 @@ def run_client(
 
     try:
         while True:
-            ret, frame = monitor.cap.read()
             now = time.time()
+
+            if monitor.cap is None and now - last_camera_retry >= 2.0:
+                try:
+                    monitor.initialize_camera()
+                except RuntimeError as exc:
+                    print(f"[{time.strftime('%H:%M:%S')}] camera init failed: {exc}")
+                last_camera_retry = now
+
+            if monitor.cap is None:
+                ret, frame = False, None
+            else:
+                ret, frame = monitor.cap.read()
+
             if not ret:
                 if now - last_sent >= interval_sec:
                     payload = {
@@ -94,6 +127,7 @@ def run_client(
                         "score": 0.0,
                         "timestamp": now,
                         "state": "Camera unavailable",
+                        "person_detected": False,
                         "pose_score": None,
                         "gaze_score": None,
                         "source": "edge-client",
@@ -107,34 +141,39 @@ def run_client(
                     print(f"[{time.strftime('%H:%M:%S')}] camera=unavailable sent={'yes' if ok else 'no'}")
                     last_sent = now
 
+                if monitor.cap is not None:
+                    monitor.cap.release()
+                    monitor.cap = None
+
                 time.sleep(0.05)
                 continue
 
             results = monitor.process_frame(frame)
             metrics = results.get("metrics") or {}
+            output_frame = frame.copy()
+            monitor.draw_info(
+                output_frame,
+                results.get("bbox"),
+                results.get("head_pose_angles"),
+                results.get("gaze_vector"),
+                results.get("scores"),
+                metrics=metrics,
+            )
 
             if display:
-                monitor.draw_info(
-                    frame,
-                    results.get("bbox"),
-                    results.get("head_pose_angles"),
-                    results.get("gaze_vector"),
-                    results.get("scores"),
-                    metrics=metrics,
-                )
+                pass
 
             if now - last_sent < interval_sec:
                 if display:
-                    import cv2
-
-                    cv2.imshow(f"Attention Client - {user_id}", frame)
+                    cv2.imshow(f"Attention Client - {user_id}", output_frame)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
                 continue
 
-            payload = build_payload(user_id=user_id, metrics=metrics)
+            payload = build_payload(user_id=user_id, results=results)
             if payload is not None:
                 ok = post_json(endpoint, payload)
+                frame_ok = post_frame(server_url, user_id, output_frame, payload["timestamp"])
                 if ok:
                     sent_count += 1
                 else:
@@ -142,15 +181,13 @@ def run_client(
 
                 print(
                     f"[{time.strftime('%H:%M:%S')}] score={payload['score']:.1f}% "
-                    f"label={payload.get('state') or 'unknown'} sent={'yes' if ok else 'no'}"
+                    f"label={payload.get('state') or 'unknown'} sent={'yes' if ok else 'no'} frame={'yes' if frame_ok else 'no'}"
                 )
 
             last_sent = now
 
             if display:
-                import cv2
-
-                cv2.imshow(f"Attention Client - {user_id}", frame)
+                cv2.imshow(f"Attention Client - {user_id}", output_frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 
