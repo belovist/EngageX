@@ -1,15 +1,4 @@
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-# This module now forwards to the unified backend app in backend/server.py
-_ROOT = Path(__file__).resolve().parents[2]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
-
 from backend.server import app
-
 
 if __name__ == "__main__":
     import uvicorn

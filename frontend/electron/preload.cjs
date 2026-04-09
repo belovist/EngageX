@@ -1,67 +1,57 @@
-const { contextBridge } = require('electron')
-const { spawn } = require('child_process')
-const fs = require('fs')
-const path = require('path')
+const { contextBridge } = require('electron');
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
 
-const repoRoot = path.resolve(__dirname, '..', '..')
+const repoRoot = path.resolve(__dirname, '..', '..');
 
 function resolvePythonExecutable() {
-  const isWindows = process.platform === 'win32'
+  const isWindows = process.platform === 'win32';
   const candidates = [
     path.join(repoRoot, '.venv', isWindows ? 'Scripts' : 'bin', isWindows ? 'python.exe' : 'python'),
     path.join(repoRoot, 'venv', isWindows ? 'Scripts' : 'bin', isWindows ? 'python.exe' : 'python'),
-  ]
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate
-    }
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
   }
-
-  return isWindows ? 'python' : 'python3'
+  return isWindows ? 'python' : 'python3';
 }
 
-let clientProcess = null
+let clientProcess = null;
 
 contextBridge.exposeInMainWorld('api', {
   startClient: () => {
     if (clientProcess && !clientProcess.killed) {
-      return
+      console.log("Already running");
+      return;
     }
 
-    const pythonExe = resolvePythonExecutable()
+    const pythonExe = resolvePythonExecutable();
+
     clientProcess = spawn(
       pythonExe,
-      [
-        '-m',
-        'clients.distributed_client',
-        '--user-id',
-        'student-1',
-        '--server-url',
-        'http://127.0.0.1:8000',
-        '--camera-id',
-        '0',
-        '--interval',
-        '1.5',
-      ],
-      {
-        cwd: repoRoot,
-        shell: false,
-        windowsHide: false,
-      }
-    )
+      ['-m', 'clients.desktop.run_virtual_cam', '--camera-id', '0'],
+      { cwd: repoRoot }
+    );
 
-    clientProcess.stdout?.on('data', (data) => {
-      console.log(`[participant-client] ${data}`.trim())
-    })
+    clientProcess.stdout.on('data', (data) => {
+      console.log(`[PYTHON] ${data}`);
+    });
 
-    clientProcess.stderr?.on('data', (data) => {
-      console.error(`[participant-client] ${data}`.trim())
-    })
+    clientProcess.stderr.on('data', (data) => {
+      console.error(`[ERROR] ${data}`);
+    });
 
     clientProcess.on('exit', (code) => {
-      console.log(`participant client exited with code ${code}`)
-      clientProcess = null
-    })
+      console.log(`Exited with ${code}`);
+      clientProcess = null;
+    });
   },
-})
+
+  stopClient: () => {
+    if (clientProcess) {
+      clientProcess.kill();
+      clientProcess = null;
+    }
+  }
+});

@@ -1,4 +1,5 @@
 import { Camera, ChevronRight, Clock3, Radar, ScanFace } from 'lucide-react';
+import { MjpegPlayer } from './MjpegPlayer';
 
 interface UserCardProps {
   user: {
@@ -30,7 +31,6 @@ function scoreAccent(score: number | null): string {
 
 function statusAccent(status: string): string {
   const normalized = status.toLowerCase();
-
   if (normalized.includes('offline') || normalized.includes('error')) return '#f87171';
   if (normalized.includes('connecting') || normalized.includes('waiting')) return '#facc15';
   if (normalized.includes('no person')) return '#fb923c';
@@ -70,7 +70,7 @@ export function UserCard({ user, onClick }: UserCardProps) {
         <div className="relative overflow-hidden border-b border-white/10 xl:border-b-0 xl:border-r">
           {user.videoSrc ? (
             <div className="aspect-video bg-slate-950">
-              <img src={user.videoSrc} alt={user.name} className="h-full w-full object-cover" />
+              <MjpegPlayer src={user.videoSrc} alt={user.name} />
             </div>
           ) : (
             <div className="flex aspect-video items-center justify-center bg-slate-950 text-slate-500">
@@ -84,7 +84,6 @@ export function UserCard({ user, onClick }: UserCardProps) {
                 <p className="text-lg font-semibold text-white">{user.name}</p>
                 <p className="text-sm text-slate-300">{user.source || 'Live source'}</p>
               </div>
-
               <div
                 className="rounded-full border px-3 py-1 text-xs font-semibold"
                 style={{
@@ -103,11 +102,10 @@ export function UserCard({ user, onClick }: UserCardProps) {
           <div className="mb-5 flex items-start justify-between gap-4">
             <div>
               <p className="mb-1 text-xs uppercase tracking-[0.24em] text-slate-500">Current Attention</p>
-              <p className="text-4xl font-semibold text-white" style={{ color: scoreColor }}>
+              <p className="text-4xl font-semibold" style={{ color: scoreColor }}>
                 {renderValue(user.score)}
               </p>
             </div>
-
             <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-right">
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Connection</p>
               <p className="text-sm font-medium text-slate-200">{user.connectionLabel || 'Live'}</p>
@@ -126,26 +124,10 @@ export function UserCard({ user, onClick }: UserCardProps) {
 
           <div className="grid grid-cols-2 gap-3">
             {[
-              {
-                label: 'Average',
-                value: renderValue(user.averageScore),
-                icon: <Radar size={15} className="text-blue-300" />,
-              },
-              {
-                label: 'Peak',
-                value: renderValue(user.peakScore),
-                icon: <ScanFace size={15} className="text-fuchsia-300" />,
-              },
-              {
-                label: 'Pose',
-                value: renderValue(user.posePercent),
-                icon: <ScanFace size={15} className="text-emerald-300" />,
-              },
-              {
-                label: 'Gaze',
-                value: renderValue(user.gazePercent),
-                icon: <Radar size={15} className="text-amber-300" />,
-              },
+              { label: 'Average', value: renderValue(user.averageScore), icon: <Radar size={15} className="text-blue-300" /> },
+              { label: 'Peak', value: renderValue(user.peakScore), icon: <ScanFace size={15} className="text-fuchsia-300" /> },
+              { label: 'Pose', value: renderValue(user.posePercent), icon: <ScanFace size={15} className="text-emerald-300" /> },
+              { label: 'Gaze', value: renderValue(user.gazePercent), icon: <Radar size={15} className="text-amber-300" /> },
             ].map((item) => (
               <div key={item.label} className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                 <div className="mb-2 flex items-center gap-2">

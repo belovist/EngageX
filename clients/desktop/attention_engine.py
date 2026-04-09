@@ -1,15 +1,7 @@
 import time
-from pathlib import Path
-import sys
 from typing import Dict, Optional
 
-
-_THIS_FILE = Path(__file__).resolve()
-_PROJECT_ROOT = _THIS_FILE.parents[2]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-
-from score_calculator import AttentivenessScoreCalculator
+from core.score_calculator import AttentivenessScoreCalculator
 
 
 class AttentionEngine:
@@ -20,7 +12,13 @@ class AttentionEngine:
             ema_alpha=0.3,
         )
 
-    def fuse(self, headpose: Optional[Dict[str, float]], gaze_score: Optional[float], microexp_score: Optional[float]) -> float:
+    def fuse(
+        self,
+        headpose: Optional[Dict[str, float]],
+        gaze_score: Optional[float],
+        microexp_score: Optional[float],
+    ) -> float:
+
         gaze_payload = None
         if gaze_score is not None:
             gaze_payload = {"gaze_score": float(gaze_score)}
@@ -30,6 +28,7 @@ class AttentionEngine:
             gaze_vector=gaze_payload,
             emotion=microexp_score,
         )
+
         smoothed = metrics.get("smoothed_score")
         return float(smoothed) if smoothed is not None else 0.0
 

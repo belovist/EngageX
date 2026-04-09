@@ -3,12 +3,8 @@ import sys
 from typing import Dict, Optional
 
 
-_THIS_FILE = Path(__file__).resolve()
-_PROJECT_ROOT = _THIS_FILE.parents[2]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
 
-from head_pose import HeadPoseEstimator as RootHeadPoseEstimator
+from core.head_pose import HeadPoseEstimator as RootHeadPoseEstimator
 
 
 class HeadPoseEstimator:

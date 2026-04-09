@@ -3,12 +3,8 @@ import sys
 from typing import Optional, Tuple, Dict, Any
 
 
-_THIS_FILE = Path(__file__).resolve()
-_PROJECT_ROOT = _THIS_FILE.parents[2]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
 
-from gatekeeper import Gatekeeper
+from core.gatekeeper import Gatekeeper
 
 
 class FaceDetector:

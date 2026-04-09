@@ -1,7 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Sidebar } from "../../components/ui/sidebar";
 import { SidebarProvider } from "../../components/ui/sidebar";
-
 import { SessionHeader } from "../../components/SessionHeader";
 import { StatisticsCards } from "../../components/StatisticsCards";
 import { UserGrid } from "../../components/UserGrid";
@@ -11,13 +10,12 @@ import { SearchBar } from "../../components/SearchBar";
 import { ProgressBar } from "../../components/ProgressBar";
 import { StatusIndicator } from "../../components/StatusIndicator";
 import { TrendIndicator } from "../../components/TrendIndicator";
-
 import { useAttentionScores } from "./hooks/useAttentionScores";
 
 export default function HostApp() {
-  const { participants } = useAttentionScores();
-
+  const { participants, connected } = useAttentionScores();
   const [searchQuery, setSearchQuery] = useState("");
+  const [chartData, setChartData] = useState<{ time: string; score: number }[]>([]);
   const [alerts, setAlerts] = useState([
     {
       id: "1",
@@ -30,7 +28,43 @@ export default function HostApp() {
 
   const participantList = Object.values(participants);
 
-  // Map backend → UI
+  const averageScore =
+    participantList.length > 0
+      ? Math.round(
+          participantList.reduce((sum: any, p: any) => sum + p.attention_score, 0) /
+            participantList.length
+        )
+      : 0;
+
+  // Build real chart data from live scores
+  useEffect(() => {
+    if (participantList.length === 0) return;
+    const now = new Date();
+    const timeLabel = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    setChartData((prev) => {
+      const next = [...prev, { time: timeLabel, score: averageScore }];
+      return next.length > 60 ? next.slice(-60) : next;
+    });
+  }, [averageScore]);
+
+  // Add alert when attention drops
+  useEffect(() => {
+    const lowAttention = participantList.filter((p: any) => p.attention_score < 40);
+    if (lowAttention.length > 0) {
+      const alertId = `low-${Date.now()}`;
+      setAlerts((prev) => [
+        ...prev.filter((a) => !a.id.startsWith("low-")),
+        {
+          id: alertId,
+          type: "warning",
+          title: "Low attention detected",
+          message: `${lowAttention.length} participant(s) have attention below 40%.`,
+          timestamp: "Just now",
+        },
+      ]);
+    }
+  }, [participantList.length]);
+
   const users = participantList.map((p: any) => ({
     id: p.participant_id,
     name: p.name || p.participant_id,
@@ -39,28 +73,19 @@ export default function HostApp() {
   }));
 
   const filteredUsers = useMemo(
-    () =>
-      users.filter((user) =>
-        user.name.toLowerCase().includes(searchQuery.toLowerCase())
-      ),
+    () => users.filter((user) => user.name.toLowerCase().includes(searchQuery.toLowerCase())),
     [searchQuery, users]
   );
 
   const sessionData = {
     sessionId: "session-123",
     totalParticipants: participantList.length,
-    averageScore:
-      participantList.length > 0
-        ? Math.round(
-            (participantList.reduce((sum: any, p: any) => sum + p.attention_score, 0) /
-              participantList.length) * 10
-          ) / 10
-        : 0,
-    duration: "00:30:00",
-    statusLabel: participantList.length > 0 ? "Live" : "Offline",
-    statusTone: (participantList.length > 0 ? "live" : "offline") as "live" | "offline",
-    sourceLabel: "WebRTC",
-    lastUpdatedLabel: "Just now",
+    averageScore,
+    duration: "Live",
+    statusLabel: connected ? "Live" : "Offline",
+    statusTone: (connected ? "live" : "offline") as "live" | "offline",
+    sourceLabel: "WebSocket",
+    lastUpdatedLabel: connected ? "Just now" : "Disconnected",
   };
 
   const stats = [
@@ -72,68 +97,47 @@ export default function HostApp() {
     },
     {
       label: "Average Attention",
-      value: sessionData.averageScore,
-      valueClass: "text-green-300",
+      value: `${averageScore}%`,
+      valueClass: averageScore >= 60 ? "text-green-300" : "text-red-300",
+      icon: null,
+    },
+    {
+      label: "Connection",
+      value: connected ? "Live" : "Offline",
+      valueClass: connected ? "text-green-300" : "text-red-300",
       icon: null,
     },
   ];
 
-  const trendValue = participantList.length > 1
-    ? Math.round(
-        ((participantList[participantList.length - 1].attention_score - participantList[0].attention_score) /
-          (participantList[0].attention_score || 1)) * 100
-      )
-    : 0;
-
-  // Chart data (demo for now)
-  const chartData = [
-    { time: "00:00", score: 50 },
-    { time: "00:05", score: 60 },
-    { time: "00:10", score: 70 },
-    { time: "00:15", score: 65 },
-    { time: "00:20", score: 80 },
-    { time: "00:25", score: 75 },
-    { time: "00:30", score: 85 },
-  ];
+  const trendValue =
+    participantList.length > 1
+      ? Math.round(
+          ((participantList[participantList.length - 1].attention_score -
+            participantList[0].attention_score) /
+            (participantList[0].attention_score || 1)) *
+            100
+        )
+      : 0;
 
   return (
     <SidebarProvider>
       <div className="flex h-screen w-screen bg-slate-950 text-white">
-        
-        {/* Sidebar */}
         <Sidebar />
-
-        {/* Main Content */}
         <div className="flex-1 w-full p-6 space-y-6 overflow-auto">
-          
-          {/* Header */}
           <SessionHeader data={sessionData} />
           <StatusIndicator status={sessionData.statusLabel} />
-
-          {/* Stats */}
           <StatisticsCards stats={stats} />
           <TrendIndicator value={trendValue} label="trend" />
-
-          {/* Progress */}
-          <ProgressBar value={75} label="Attention Progress" />
-
-          {/* Chart */}
+          <ProgressBar value={averageScore} label="Class Attention" />
           <AttentionChart data={chartData} />
-
-          {/* Alerts */}
           <AlertPanel
             alerts={alerts}
             onDismiss={(id: string) =>
               setAlerts((current) => current.filter((alert) => alert.id !== id))
             }
           />
-
-          {/* Search */}
           <SearchBar onSearch={setSearchQuery} />
-
-          {/* Users */}
           <UserGrid users={filteredUsers} />
-
         </div>
       </div>
     </SidebarProvider>

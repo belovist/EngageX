@@ -10,9 +10,7 @@ import sys
 from pathlib import Path
 
 # Add project root to path for imports
-_PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+
 
 import cv2
 from core.attention_monitor import AttentionMonitor
