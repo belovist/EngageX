@@ -3,6 +3,7 @@ const path = require('path')
 const http = require('http')
 
 let mainWindow
+const defaultStartUrl = 'http://127.0.0.1:3000/'
 
 function waitForVite(retries = 20, delay = 1000) {
   return new Promise((resolve, reject) => {
@@ -26,12 +27,13 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      sandbox: false,
     }
   })
 
-  // Always load home page so user can choose role
-  mainWindow.loadURL('http://127.0.0.1:3000/')
+  // Honor the existing desktop start URL hook while keeping the home screen as the default.
+  mainWindow.loadURL(process.env.ELECTRON_START_URL || defaultStartUrl)
 }
 
 app.whenReady().then(async () => {
