@@ -1,231 +1,308 @@
-# EngageX - Real-Time Attention Monitoring System
+# EngageX
 
-A lightweight, CPU-oriented attention monitoring system built with YOLOv8 Nano, MediaPipe Face Mesh, L2CS-Net gaze estimation, FastAPI, and a live React dashboard.
+EngageX is a LAN-first attention monitoring system for classroom or meeting setups.
 
-## Project Structure
+One laptop runs the admin backend and dashboard. Participant laptops connect over the same Wi-Fi, run local attention inference, and send lightweight JSON scores back to the admin laptop. Participant laptops can also publish a virtual camera feed for Zoom, Meet, Teams, or OBS.
 
-```
-EngageX/
-├── README.md                     # This file
-├── requirements.txt              # Python dependencies
-├── start-engagex-all.ps1        # Windows launcher script
-├── start-engagex-all.sh         # macOS/Linux launcher script
-│
-├── backend/                      # FastAPI server
-│   ├── __init__.py
-│   └── server.py                 # Unified backend API
-│
-├── core/                         # ML pipeline modules
-│   ├── __init__.py
-│   ├── attention_monitor.py      # Main pipeline integration
-│   ├── gatekeeper.py             # Stage I: YOLO person detection
-│   ├── head_pose.py              # Stage II: MediaPipe head pose
-│   ├── gaze_tracker.py           # Stage III: L2CS-Net gaze tracking
-│   └── score_calculator.py       # Stage IV: Score fusion
-│
-├── clients/                      # Client applications
-│   ├── __init__.py
-│   ├── distributed_client.py     # Edge client for multi-device setup
-│   ├── metrics_writer.py         # JSON metrics file writer
-│   ├── sim_publisher.py          # Score simulator for testing
-│   └── desktop/                  # Desktop virtual camera client
-│       ├── __init__.py
-│       ├── run_virtual_cam.py    # Virtual camera for meeting apps
-│       └── ...
-│
-├── models/                       # ML model files (see models/README.md)
-│   └── README.md
-│
-├── frontend/                     # React dashboard
-│   └── ...
-│
-├── docs/                         # Documentation
-│   ├── BACKEND_INTEGRATION.md
-│   ├── IMPLEMENTATION_PLAN.md
-│   ├── PROJECT_EXPLANATION.md
-│   └── project_details.md
-│
-├── examples/                     # Example usage scripts
-│   └── example_usage.py
-│
-├── scripts/                      # Utility scripts
-│   ├── export_l2cs_to_onnx.py
-│   └── test_mp.py
-│
-└── legacy/                       # Deprecated implementations
-    └── head_pose_opencv.py
-```
+## What Works
 
-## What It Does
+- Admin dashboard for session creation and live monitoring
+- Participant desktop client for LAN score publishing
+- Participant virtual camera mode for meeting apps
+- Session history stored in SQLite
+- Delete old sessions from the admin dashboard
+- Live multi-participant trend graph on the admin dashboard
+- Sustained low-attention alerts when a participant stays below 25% for 5 minutes
+- Head-pose-only fallback when the gaze model is missing
 
-Pipeline:
+## Project Layout
 
 ```text
-Input Frame -> YOLO Gatekeeper -> Head Pose -> Gaze Tracking -> Score Calculation
+pbl/
+|- backend/
+|  `- server.py
+|- clients/
+|  |- distributed_client.py
+|  `- desktop/
+|     |- run_virtual_cam.py
+|     `- virtual_cam_output.py
+|- core/
+|  |- attention_monitor.py
+|  |- gatekeeper.py
+|  |- head_pose.py
+|  |- gaze_tracker.py
+|  `- score_calculator.py
+|- frontend/
+|  |- electron/
+|  `- src/
+|- models/
+|- start.ps1
+|- start.sh
+|- start_participant.ps1
+|- start_participant.sh
+`- requirements.txt
 ```
 
-- **Stage I**: Person detection and ROI cropping (YOLOv8 Nano)
-- **Stage II**: Head pose estimation (MediaPipe Face Mesh)
-- **Stage III**: Gaze estimation (L2CS-Net ONNX - optional)
-- **Stage IV**: Smoothed attention scoring (EMA fusion)
-- **Backend**: FastAPI server for live JSON, SSE, and WebSocket APIs
-- **Frontend**: React dashboard connected to the backend in real time
+## Main Flows
 
-## Quick Start
+### Admin laptop
 
-### Option A: Launcher Scripts (Recommended)
+Starts:
 
-**Windows:**
+- FastAPI backend on port `8000`
+- Vite frontend on port `3000`
+- Electron desktop window for the admin dashboard
+
+Windows:
+
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\start-engagex-all.ps1 -CleanPorts
 ```
 
-**macOS/Linux:**
-```bash
-chmod +x ./start-engagex-all.sh
-./start-engagex-all.sh
+You can also run:
+
+```powershell
+.\start.ps1 -CleanPorts
 ```
 
-The launcher supports both `.venv` and `venv` virtual environments and prefers `.venv` when both exist.
+macOS/Linux:
 
-### Option B: Manual Setup
+```bash
+chmod +x ./start-engagex-all.sh
+./start-engagex-all.sh --clean-ports
+```
 
-#### 1. Create and activate virtual environment
+### Participant laptop
+
+Starts:
+
+- Vite frontend on port `3000`
+- Electron desktop window for the participant app
+
+Windows:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\start_participant.ps1 -CleanPorts
+```
+
+macOS/Linux:
+
+```bash
+chmod +x ./start_participant.sh
+./start_participant.sh --clean-ports
+```
+
+In the participant app:
+
+1. Enter the admin laptop server IP.
+2. Enter the session ID.
+3. Enter the participant user ID.
+4. Choose one of these modes:
+
+- `Start Local Client`
+  Sends attention scores over the LAN.
+- `Start Virtual Camera`
+  Runs the attention pipeline and publishes a virtual camera feed for meeting apps.
+
+Use `Stop Running Mode` before switching between these modes.
+
+## Admin Dashboard Features
+
+- Create or refresh a session from a meeting link
+- View recent sessions
+- Delete previous sessions directly from the dashboard
+- See all participant rows with latest score, average, samples, and last-seen time
+- See a multi-line graph of all participant score trends
+- See sustained low-attention alert cards
+
+### Low-attention alerts
+
+An alert is raised when:
+
+- The participant's latest continuous score streak stays below `25%`
+- That low streak lasts at least `5 minutes`
+- The participant is still actively sending recent samples
+
+These alerts appear on the admin dashboard and are also reflected in the participant table.
+
+## Virtual Camera Mode
+
+The participant-side virtual camera mode runs:
+
+```bash
+python -m clients.desktop.run_virtual_cam
+```
+
+The desktop app now starts this for you from the participant UI, but you can still run it manually if needed:
+
+```powershell
+.\.venv\Scripts\python.exe -m clients.desktop.run_virtual_cam `
+  --session-id SES-XXXXXXXXXX `
+  --user-id student-1 `
+  --backend-url http://192.168.0.25:8000 `
+  --camera-id 0 `
+  --show-preview
+```
+
+After virtual camera mode starts:
+
+1. Open Zoom, Meet, Teams, or OBS.
+2. Select the virtual camera device exposed on the participant laptop.
+3. Keep the EngageX participant process running.
+
+Do not run `Start Local Client` and `Start Virtual Camera` at the same time on the same participant laptop.
+
+## Manual Setup
+
+### 1. Create a virtual environment
 
 ```bash
 python -m venv .venv
+```
 
-# Windows
-.venv\Scripts\activate
+Windows:
 
-# macOS/Linux
+```powershell
+.\.venv\Scripts\activate
+```
+
+macOS/Linux:
+
+```bash
 source .venv/bin/activate
 ```
 
-#### 2. Install Python dependencies
+### 2. Install Python dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-#### 3. Start the backend
+This includes:
 
-```bash
-python -m uvicorn backend.server:app --host 127.0.0.1 --port 8000 --reload
-```
+- OpenCV
+- MediaPipe
+- ONNX Runtime
+- Ultralytics
+- FastAPI
+- pyvirtualcam
 
-#### 4. Start the frontend
-
-In a second terminal:
+### 3. Install frontend dependencies
 
 ```bash
 cd frontend
 npm install
+```
+
+### 4. Run manually
+
+Backend:
+
+```bash
+python -m uvicorn backend.server:app --host 0.0.0.0 --port 8000
+```
+
+Frontend:
+
+```bash
+cd frontend
 npm run dev
 ```
 
-#### 5. Open the dashboard
-
-- Host view: http://127.0.0.1:3000/host
-- Participant view: http://127.0.0.1:3000/participant
-- Health check: http://127.0.0.1:8000/health
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Health check |
-| GET | `/api/metrics` | Current metrics snapshot |
-| GET | `/api/attention/stream` | SSE stream of metrics |
-| GET | `/api/attention/users` | List of active users |
-| GET | `/api/attention/analytics` | Class-wide analytics |
-| GET | `/api/attention/history/{user_id}` | User score history |
-| GET | `/api/attention/distributed/stream` | SSE for distributed mode |
-| POST | `/api/attention/score` | Submit attention score |
-| WS | `/ws/scores` | WebSocket for real-time scores |
-
-## Other Modes
-
-### JSON-only mode (no server)
-
-Write metrics to a JSON file without running the HTTP server:
+Electron desktop window:
 
 ```bash
-python -m clients.metrics_writer
+cd frontend
+npm run electron
 ```
 
-### OpenCV window mode
+## Models
 
-Display local overlay window instead of the web dashboard:
+Expected model files:
 
-```bash
-python -m core.attention_monitor
-```
+- `yolov8n.pt`
+- `models/face_landmarker.task`
+- `models/l2cs_net.onnx`
 
-Press `q` to quit.
+Notes:
 
-### Distributed client mode (multi-device)
+- `yolov8n.pt` is used for person detection.
+- `face_landmarker.task` is used by the head-pose path.
+- `l2cs_net.onnx` enables gaze tracking.
+- If `l2cs_net.onnx` is missing, the system still runs with head-pose-only scoring.
 
-Run on each participant device to send scores to central backend:
+## API Surface
 
-```bash
-python -m clients.distributed_client --user-id student-1 --server-url http://127.0.0.1:8000
-```
+### Core
 
-### Virtual camera mode (for meeting apps)
+- `GET /health`
+- `GET /api/system/info`
+- `GET /api/metrics`
+- `GET /api/scores`
 
-Use with Zoom/Meet/Teams:
+### Admin
 
-```bash
-python -m clients.desktop.run_virtual_cam --camera-id 0 --show-preview
-```
+- `GET /api/admin/sessions`
+- `POST /api/admin/session`
+- `DELETE /api/admin/sessions/{session_id}`
 
-## Model Setup
+### Session detail
 
-See `models/README.md` for detailed instructions.
+- `GET /api/sessions/{session_id}`
+- `GET /api/sessions/{session_id}/participants`
+- `GET /api/sessions/{session_id}/participants/{user_id}`
+- `POST /api/sessions/{session_id}/scores`
 
-- **YOLOv8 Nano**: Auto-downloaded on first run
-- **L2CS-Net ONNX**: Must be exported manually from an external optional `L2CS-Net/` clone (ignored by git)
-- If the gaze model is missing, EngageX runs in head-pose-only mode
+### Compatibility endpoints
 
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CAMERA_ID` | `0` | Camera index |
-| `GAZE_MODEL_PATH` | `models/l2cs_net.onnx` | Path to gaze model |
-| `ATTENTION_METRICS_PATH` | `attention_metrics.json` | Output file for metrics |
+- `POST /api/attention/score`
+- `POST /attention_score`
+- `POST /api/score`
+- `GET /api/attention/users`
+- `GET /api/attention/analytics`
+- `GET /api/attention/history/{user_id}`
+- `GET /analytics/users`
 
 ## Troubleshooting
 
-### Uvicorn not found on Windows
+### Camera does not open
 
-Use module syntax:
-```bash
-python -m uvicorn backend.server:app --host 127.0.0.1 --port 8000 --reload
-```
+- Close Zoom, Meet, Teams, OBS, or any browser tab that is already using the webcam.
+- Try another camera index.
+- On Windows, allow camera access in system privacy settings.
 
-### Camera not opening
+### Virtual camera does not show up in the meeting app
 
-- Check camera permissions
-- Try another camera index (e.g., `--camera-id 1`)
-- Ensure no other app is using the webcam
+- Start the EngageX virtual camera first.
+- Then reopen Zoom, Meet, Teams, or OBS.
+- Make sure `pyvirtualcam` is installed in the participant laptop's `.venv`.
 
-### Missing gaze model
+### Participant can reach the UI but cannot send data
 
-The app continues running without L2CS-Net. Attention is computed from head pose only.
+- Confirm the admin laptop backend is running on port `8000`.
+- Confirm both laptops are on the same Wi-Fi.
+- Confirm Windows Firewall allows the admin backend on port `8000`.
 
-### MediaPipe import error
+### Gaze model is missing
 
-Use a Python/MediaPipe version that supports `mp.solutions.face_mesh`.
+The system still works. Gaze-based scoring is disabled and attention falls back to the head-pose path.
 
-## Documentation
+## Verification Notes
 
-- [Backend Integration](docs/BACKEND_INTEGRATION.md)
-- [Implementation Plan](docs/IMPLEMENTATION_PLAN.md)
-- [Project Explanation](docs/PROJECT_EXPLANATION.md)
+The current codebase has been smoke-checked for:
 
-## License
+- frontend production build
+- backend Python syntax
+- distributed client CLI entrypoint
+- virtual camera CLI entrypoint
+- gaze, gatekeeper, and attention-monitor model loading
+- session create, score insert, alert generation, and session delete logic against a temporary backend store
 
-[Your license here]
+## Related Docs
+
+- [docs/BACKEND_INTEGRATION.md](docs/BACKEND_INTEGRATION.md)
+- [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
+- [docs/PROJECT_EXPLANATION.md](docs/PROJECT_EXPLANATION.md)
+- [docs/project_details.md](docs/project_details.md)

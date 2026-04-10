@@ -13,6 +13,11 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+LOW_ATTENTION_THRESHOLD = 25.0
+LOW_ATTENTION_WINDOW_SECONDS = 5 * 60
+LOW_ATTENTION_STALE_AFTER_SECONDS = 45.0
+LOW_ATTENTION_HISTORY_LIMIT = 240
+
 
 def _normalize_meeting_link(meeting_link: str) -> str:
     normalized = meeting_link.strip()
@@ -196,6 +201,34 @@ class SessionStore:
             ).fetchall()
 
         return [dict(row) for row in rows]
+
+    def delete_session(self, session_id: str) -> dict | None:
+        with self._lock:
+            session_row = self.conn.execute(
+                """
+                SELECT
+                    s.session_id,
+                    s.meeting_link,
+                    s.created_at,
+                    s.updated_at,
+                    COUNT(sc.id) AS total_samples,
+                    COUNT(DISTINCT sc.user_id) AS total_participants
+                FROM sessions s
+                LEFT JOIN scores sc ON sc.session_id = s.session_id
+                WHERE s.session_id = ?
+                GROUP BY s.session_id
+                """,
+                (session_id,),
+            ).fetchone()
+
+            if session_row is None:
+                return None
+
+            self.conn.execute("DELETE FROM scores WHERE session_id = ?", (session_id,))
+            self.conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+            self.conn.commit()
+
+        return dict(session_row)
 
     def latest_session_id(self) -> str | None:
         with self._lock:
@@ -407,6 +440,81 @@ class SessionStore:
 
         return participants
 
+    def sustained_low_attention_alerts(
+        self,
+        session_id: str,
+        threshold: float = LOW_ATTENTION_THRESHOLD,
+        duration_seconds: float = LOW_ATTENTION_WINDOW_SECONDS,
+        stale_after_seconds: float = LOW_ATTENTION_STALE_AFTER_SECONDS,
+        history_limit: int = LOW_ATTENTION_HISTORY_LIMIT,
+    ) -> List[dict]:
+        participants = self.participant_summaries(session_id)
+        now = time.time()
+        alerts: List[dict] = []
+
+        for participant in participants:
+            user_id = participant["user_id"]
+            history = self.user_history(session_id=session_id, user_id=user_id, limit=history_limit)
+            if len(history) < 2:
+                continue
+
+            latest_entry = history[-1]
+            latest_timestamp = float(latest_entry["timestamp"])
+            if now - latest_timestamp > stale_after_seconds:
+                continue
+
+            low_streak: List[dict] = []
+            for entry in reversed(history):
+                if float(entry["score"]) < threshold:
+                    low_streak.append(entry)
+                    continue
+                break
+
+            if len(low_streak) < 2:
+                continue
+
+            streak_start = float(low_streak[-1]["timestamp"])
+            streak_end = float(low_streak[0]["timestamp"])
+            duration = streak_end - streak_start
+
+            if duration < duration_seconds:
+                continue
+
+            average_score = round(
+                sum(float(entry["score"]) for entry in low_streak) / len(low_streak),
+                2,
+            )
+            minimum_score = round(min(float(entry["score"]) for entry in low_streak), 2)
+            latest_score = round(float(low_streak[0]["score"]), 2)
+            triggered_at = streak_start + duration_seconds
+            alert_id = f"low-attention:{session_id}:{user_id}:{int(streak_start)}"
+
+            alerts.append(
+                {
+                    "id": alert_id,
+                    "type": "low_attention_sustained",
+                    "severity": "critical",
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "title": f"{user_id} has been below {threshold:.0f}% for 5+ minutes",
+                    "message": (
+                        f"{user_id} has stayed below {threshold:.0f}% attention for "
+                        f"{int(duration // 60)}m {int(duration % 60)}s."
+                    ),
+                    "threshold": round(float(threshold), 2),
+                    "duration_seconds": round(float(duration), 2),
+                    "sample_count": len(low_streak),
+                    "latest_score": latest_score,
+                    "average_score": average_score,
+                    "minimum_score": minimum_score,
+                    "last_seen": latest_timestamp,
+                    "triggered_at": triggered_at,
+                }
+            )
+
+        alerts.sort(key=lambda alert: (-float(alert["duration_seconds"]), str(alert["user_id"])))
+        return alerts
+
     def session_detail(self, session_id: str, limit_per_user: int = 30) -> dict | None:
         session = self.get_session(session_id)
         if session is None:
@@ -414,6 +522,7 @@ class SessionStore:
 
         participants = self.participant_summaries(session_id)
         scores_by_user = self.participant_histories(session_id, limit_per_user=limit_per_user)
+        alerts = self.sustained_low_attention_alerts(session_id)
         latest_scores = [participant["latest_score"] for participant in participants]
         last_updated = max((participant["last_seen"] for participant in participants), default=session["updated_at"])
 
@@ -422,6 +531,7 @@ class SessionStore:
             "total_samples": int(session["total_samples"]),
             "average_score": round(sum(latest_scores) / len(latest_scores), 2) if latest_scores else 0.0,
             "last_updated": float(last_updated or time.time()),
+            "alert_count": len(alerts),
         }
 
         return {
@@ -434,6 +544,7 @@ class SessionStore:
                 "total_participants": int(session["total_participants"]),
             },
             "summary": summary,
+            "alerts": alerts,
             "participants": participants,
             "scores_by_user": scores_by_user,
         }
@@ -531,6 +642,22 @@ def create_session(payload: SessionCreatePayload) -> dict:
         "server": _system_info(),
         "session": detail["session"],
         "summary": detail["summary"],
+    }
+
+
+@app.delete("/api/admin/sessions/{session_id}")
+def delete_session(session_id: str) -> dict:
+    deleted = store.delete_session(session_id)
+    if deleted is None:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' was not found.")
+
+    next_session_id = store.latest_session_id()
+    return {
+        "ok": True,
+        "deleted_session_id": session_id,
+        "deleted": deleted,
+        "active_session_id": next_session_id,
+        "server": _system_info(),
     }
 
 
