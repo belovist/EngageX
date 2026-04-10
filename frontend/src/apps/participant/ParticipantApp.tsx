@@ -25,6 +25,8 @@ type SessionDetail = {
   participants: ParticipantSummary[]
 }
 
+type RunMode = 'local-client' | 'virtual-camera'
+
 function normalizeServerUrl(input: string): string {
   const trimmed = input.trim()
   if (!trimmed) return ''
@@ -99,7 +101,7 @@ export default function ParticipantApp() {
   const [userId, setUserId] = useState(() => window.localStorage.getItem('engagex.participant.userId') || 'student-1')
   const [statusMessage, setStatusMessage] = useState('Enter server IP, session ID, and user ID.')
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null)
-  const [running, setRunning] = useState(false)
+  const [runningMode, setRunningMode] = useState<RunMode | null>(null)
 
   useEffect(() => {
     window.localStorage.setItem('engagex.participant.server', serverInput)
@@ -153,7 +155,7 @@ export default function ParticipantApp() {
     return sessionDetail.participants.find((participant) => participant.user_id === userId.trim()) || null
   }, [sessionDetail, userId])
 
-  const handleStart = async () => {
+  const handleStart = async (mode: RunMode) => {
     const trimmedSessionId = sessionId.trim()
     const trimmedUserId = userId.trim()
 
@@ -169,33 +171,54 @@ export default function ParticipantApp() {
       } else {
         setStatusMessage(`Could not reach the admin laptop at ${serverUrl}.`)
       }
-      setRunning(false)
+      setRunningMode(null)
       return
     }
 
-    const result = window.api?.startClient({
-      sessionId: trimmedSessionId,
-      userId: trimmedUserId,
-      serverUrl,
-      intervalSec: 3,
-      cameraId: 0,
-      preview: false,
-    })
+    const result =
+      mode === 'virtual-camera'
+        ? window.api?.startVirtualCamera({
+            sessionId: trimmedSessionId,
+            userId: trimmedUserId,
+            serverUrl,
+            intervalSec: 3,
+            cameraId: 0,
+            preview: false,
+          })
+        : window.api?.startClient({
+            sessionId: trimmedSessionId,
+            userId: trimmedUserId,
+            serverUrl,
+            intervalSec: 3,
+            cameraId: 0,
+            preview: false,
+          })
 
     if (!result?.ok) {
       setStatusMessage(result?.error || 'Desktop client bridge is unavailable.')
-      setRunning(false)
+      setRunningMode(null)
       return
     }
 
-    setRunning(true)
-    setStatusMessage(`Client running for ${trimmedUserId} in ${trimmedSessionId}.`)
+    setRunningMode(mode)
+    setStatusMessage(
+      mode === 'virtual-camera'
+        ? `Virtual camera running for ${trimmedUserId}. Select the virtual camera in Zoom, Meet, or Teams.`
+        : `Client running for ${trimmedUserId} in ${trimmedSessionId}.`
+    )
   }
 
   const handleStop = () => {
-    window.api?.stopClient()
-    setRunning(false)
-    setStatusMessage('Client stopped.')
+    const stopped = window.api?.stopClient()
+    const activeMode = runningMode
+    setRunningMode(null)
+
+    if (stopped?.ok) {
+      setStatusMessage(activeMode === 'virtual-camera' ? 'Virtual camera stopped.' : 'Client stopped.')
+      return
+    }
+
+    setStatusMessage('No participant process is running.')
   }
 
   return (
@@ -203,9 +226,9 @@ export default function ParticipantApp() {
       <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-5 py-6 lg:px-8">
         <section className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-slate-950/40">
           <p className="text-xs uppercase tracking-[0.22em] text-emerald-300">Participant</p>
-          <h1 className="mt-2 text-4xl font-semibold text-white">EngageX LAN Client</h1>
+          <h1 className="mt-2 text-4xl font-semibold text-white">EngageX Participant Client</h1>
           <p className="mt-2 text-sm text-slate-400">
-            Connect to the admin laptop over the same Wi-Fi, then send lightweight JSON attention scores every few seconds.
+            Connect to the admin laptop over the same Wi-Fi, then either send lightweight JSON attention scores or publish a virtual camera feed for meeting apps.
           </p>
 
           <div className="mt-6 grid gap-4 md:grid-cols-3">
@@ -242,23 +265,36 @@ export default function ParticipantApp() {
 
           <div className="mt-5 flex flex-col gap-3 sm:flex-row">
             <button
-              onClick={handleStart}
+              onClick={() => void handleStart('local-client')}
               className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
             >
               Start Local Client
             </button>
             <button
+              onClick={() => void handleStart('virtual-camera')}
+              className="rounded-xl bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
+            >
+              Start Virtual Camera
+            </button>
+            <button
               onClick={handleStop}
               className="rounded-xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:border-slate-500"
             >
-              Stop Client
+              Stop Running Mode
             </button>
           </div>
 
+          <p className="mt-3 text-xs text-slate-500">
+            Use local client mode for score-only LAN updates. Use virtual camera mode when Zoom, Meet, Teams, or OBS on this laptop needs a camera source.
+          </p>
+
           <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
             <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Status</p>
-            <p className={`mt-2 text-lg font-semibold ${running ? 'text-emerald-300' : 'text-amber-300'}`}>
+            <p className={`mt-2 text-lg font-semibold ${runningMode ? 'text-emerald-300' : 'text-amber-300'}`}>
               {statusMessage}
+            </p>
+            <p className="mt-2 text-xs uppercase tracking-[0.22em] text-slate-500">
+              Active Mode: {runningMode === 'virtual-camera' ? 'Virtual Camera' : runningMode === 'local-client' ? 'Local Client' : 'Idle'}
             </p>
             <p className="mt-2 text-xs text-slate-500">{serverUrl || 'Waiting for a valid backend URL'}</p>
           </div>
@@ -345,7 +381,8 @@ export default function ParticipantApp() {
               <ol className="mt-3 space-y-2 text-sm text-slate-300">
                 <li>1. Get the server IP and session ID from the admin laptop.</li>
                 <li>2. Enter them here with your user ID.</li>
-                <li>3. Start the local client to send JSON scores over the LAN.</li>
+                <li>3. Start Local Client for score-only LAN mode.</li>
+                <li>4. Start Virtual Camera when a meeting app on this laptop needs the EngageX camera feed.</li>
               </ol>
             </div>
           </div>

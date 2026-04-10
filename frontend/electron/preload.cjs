@@ -1,5 +1,5 @@
 const { contextBridge } = require('electron')
-const { spawn } = require('child_process')
+const { spawn, spawnSync } = require('child_process')
 const fs = require('fs')
 const http = require('http')
 const https = require('https')
@@ -24,6 +24,33 @@ function resolvePythonExecutable() {
 }
 
 let clientProcess = null
+
+function checkPythonModule(pythonExe, moduleName) {
+  const check = spawnSync(
+    pythonExe,
+    ['-c', `import ${moduleName}`],
+    {
+      cwd: repoRoot,
+      shell: false,
+      windowsHide: true,
+      encoding: 'utf8',
+    }
+  )
+
+  if (check.status === 0) {
+    return { ok: true }
+  }
+
+  const details = [check.stderr, check.stdout]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ')
+
+  return {
+    ok: false,
+    error: details || `Required Python module '${moduleName}' is not installed.`,
+  }
+}
 
 function requestJson(method, rawUrl, body = null, timeoutMs = 5000) {
   return new Promise((resolve) => {
@@ -117,6 +144,41 @@ function stopClientProcess() {
   return true
 }
 
+function startPythonModule(moduleName, moduleArgs, logPrefix) {
+  stopClientProcess()
+
+  const pythonExe = resolvePythonExecutable()
+  clientProcess = spawn(
+    pythonExe,
+    ['-m', moduleName, ...moduleArgs],
+    {
+      cwd: repoRoot,
+      shell: false,
+      windowsHide: false,
+    }
+  )
+
+  clientProcess.stdout?.on('data', (data) => {
+    console.log(`[${logPrefix}] ${String(data).trim()}`)
+  })
+
+  clientProcess.stderr?.on('data', (data) => {
+    console.error(`[${logPrefix}] ${String(data).trim()}`)
+  })
+
+  clientProcess.on('error', (error) => {
+    console.error(`[${logPrefix}] failed to start: ${error instanceof Error ? error.message : String(error)}`)
+    clientProcess = null
+  })
+
+  clientProcess.on('exit', (code) => {
+    console.log(`${logPrefix} exited with code ${code}`)
+    clientProcess = null
+  })
+
+  return { ok: true }
+}
+
 contextBridge.exposeInMainWorld('api', {
   fetchSession: async (config = {}) => {
     const sessionId = String(config.sessionId || '').trim()
@@ -153,48 +215,62 @@ contextBridge.exposeInMainWorld('api', {
       return { ok: false, error: 'sessionId, userId, and serverUrl are required.' }
     }
 
-    stopClientProcess()
-
-    const pythonExe = resolvePythonExecutable()
-    const args = [
-      '-m',
+    return startPythonModule(
       'clients.distributed_client',
-      '--session-id',
-      sessionId,
-      '--user-id',
-      userId,
-      '--server-url',
-      serverUrl,
-      '--camera-id',
-      cameraId,
-      '--interval',
-      interval,
-    ]
+      [
+        '--session-id',
+        sessionId,
+        '--user-id',
+        userId,
+        '--server-url',
+        serverUrl,
+        '--camera-id',
+        cameraId,
+        '--interval',
+        interval,
+        ...(preview ? ['--display'] : []),
+      ],
+      'participant-client'
+    )
+  },
+  startVirtualCamera: (config = {}) => {
+    const sessionId = String(config.sessionId || '').trim()
+    const userId = String(config.userId || '').trim()
+    const serverUrl = String(config.serverUrl || '').trim()
+    const cameraId = Number.isFinite(Number(config.cameraId)) ? String(Number(config.cameraId)) : '0'
+    const interval = Number.isFinite(Number(config.intervalSec)) ? String(Number(config.intervalSec)) : '3'
+    const preview = Boolean(config.preview)
 
-    if (preview) {
-      args.push('--display')
+    if (!sessionId || !userId || !serverUrl) {
+      return { ok: false, error: 'sessionId, userId, and serverUrl are required.' }
     }
 
-    clientProcess = spawn(pythonExe, args, {
-      cwd: repoRoot,
-      shell: false,
-      windowsHide: false,
-    })
+    const pythonExe = resolvePythonExecutable()
+    const moduleCheck = checkPythonModule(pythonExe, 'pyvirtualcam')
+    if (!moduleCheck.ok) {
+      return {
+        ok: false,
+        error: 'Virtual camera support is not installed in this Python environment. Install pyvirtualcam, then try again.',
+      }
+    }
 
-    clientProcess.stdout?.on('data', (data) => {
-      console.log(`[participant-client] ${String(data).trim()}`)
-    })
-
-    clientProcess.stderr?.on('data', (data) => {
-      console.error(`[participant-client] ${String(data).trim()}`)
-    })
-
-    clientProcess.on('exit', (code) => {
-      console.log(`participant client exited with code ${code}`)
-      clientProcess = null
-    })
-
-    return { ok: true }
+    return startPythonModule(
+      'clients.desktop.run_virtual_cam',
+      [
+        '--session-id',
+        sessionId,
+        '--user-id',
+        userId,
+        '--backend-url',
+        serverUrl,
+        '--camera-id',
+        cameraId,
+        '--send-interval',
+        interval,
+        ...(preview ? ['--show-preview'] : []),
+      ],
+      'participant-virtual-camera'
+    )
   },
   stopClient: () => ({ ok: stopClientProcess() }),
 })

@@ -26,6 +26,14 @@ declare global {
         intervalSec?: number
         preview?: boolean
       }) => { ok: boolean; error?: string }
+      startVirtualCamera: (config: {
+        sessionId: string
+        userId: string
+        serverUrl: string
+        cameraId?: number
+        intervalSec?: number
+        preview?: boolean
+      }) => { ok: boolean; error?: string }
       stopClient: () => { ok: boolean }
     }
   }
