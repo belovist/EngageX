@@ -21,9 +21,10 @@ def parse_args():
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--fps", type=int, default=30)
+    parser.add_argument("--session-id", required=True)
     parser.add_argument("--user-id", default="desktop-user")
     parser.add_argument("--backend-url", default="http://127.0.0.1:8000")
-    parser.add_argument("--send-interval", type=float, default=1.5)
+    parser.add_argument("--send-interval", type=float, default=3.0)
     parser.add_argument("--gaze-model-path", default="models/l2cs_net.onnx")
     parser.add_argument("--show-preview", action="store_true")
     return parser.parse_args()
@@ -39,7 +40,7 @@ def score_to_label(score):
 
 
 def post_score_event(base_url, payload):
-    endpoint = f"{base_url.rstrip('/')}/api/attention/score"
+    endpoint = f"{base_url.rstrip('/')}/api/sessions/{payload['session_id']}/scores"
     request = urllib.request.Request(
         endpoint,
         data=json.dumps(payload).encode("utf-8"),
@@ -53,7 +54,7 @@ def post_score_event(base_url, payload):
         return False
 
 
-def process_frame(frame, engine, detector, headpose, gaze, user_id):
+def process_frame(frame, engine, detector, headpose, gaze, session_id, user_id):
     det = detector.detect(frame)
 
     headpose_result = None
@@ -75,6 +76,7 @@ def process_frame(frame, engine, detector, headpose, gaze, user_id):
     score = engine.fuse(headpose_result, gaze_score, None)
     label = score_to_label(score)
     event = engine.build_event(user_id=user_id, score_0_to_1=score, state=label)
+    event["session_id"] = session_id
 
     cv2.putText(
         frame,
@@ -124,6 +126,7 @@ def main():
                 detector,
                 headpose,
                 gaze,
+                args.session_id,
                 args.user_id,
             )
 

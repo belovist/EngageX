@@ -1,17 +1,17 @@
-import { SCORE_API_URL, SCORE_WS_URL } from "./constants";
+import { SCORE_API_URL } from "./constants";
 import type { AttentionSnapshotResponse, AttentionScorePayload } from "./types";
 
 export async function fetchScoresSnapshot(apiUrl: string = SCORE_API_URL): Promise<AttentionSnapshotResponse> {
-  const res = await fetch(apiUrl, { headers: { "Content-Type": "application/json" } });
-  if (!res.ok) {
-    throw new Error(`Failed to fetch scores: ${res.status}`);
+  const response = await fetch(apiUrl, {
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch scores: ${response.status}`);
   }
 
-  return (await res.json()) as AttentionSnapshotResponse;
-}
-
-export function getScoresWebSocketUrl(url: string = SCORE_WS_URL): string {
-  return url;
+  return (await response.json()) as AttentionSnapshotResponse;
 }
 
 export function normalizeScorePayload(payload: AttentionScorePayload): AttentionScorePayload {

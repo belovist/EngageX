@@ -36,6 +36,14 @@ function Ensure-FrontendDeps {
     }
 }
 
+function Ensure-Models {
+    $onnxPath = Join-Path $REPO_ROOT "models\l2cs_net.onnx"
+    $taskPath = Join-Path $REPO_ROOT "models\face_landmarker.task"
+    if (-not (Test-Path $onnxPath) -or -not (Test-Path $taskPath)) {
+        & $PYTHON_BIN (Join-Path $REPO_ROOT "setup_models.py")
+    }
+}
+
 function Stop-ProcessesOnPort {
     param([int[]]$Ports)
 
@@ -71,29 +79,13 @@ function Wait-ForHttpOk {
     return $false
 }
 
-function Get-SystemInfo {
-    try {
-        $response = Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/system/info" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
-        return ($response.Content | ConvertFrom-Json)
-    } catch {
-        return $null
-    }
-}
-
-Write-Host "Starting EngageX Admin..." -ForegroundColor Cyan
+Write-Host "Starting EngageX Participant..." -ForegroundColor Cyan
 Ensure-PythonEnv
 Ensure-FrontendDeps
+Ensure-Models
 
 if ($CleanPorts) {
-    Stop-ProcessesOnPort -Ports @(3000, 8000)
-}
-
-$backend = Start-Process -PassThru -NoNewWindow -FilePath $PYTHON_BIN `
-    -ArgumentList "-m uvicorn backend.server:app --host 0.0.0.0 --port 8000 --reload" `
-    -WorkingDirectory $REPO_ROOT
-
-if (-not (Wait-ForHttpOk -Url "http://127.0.0.1:8000/health" -TimeoutSeconds 30)) {
-    throw "Backend did not become ready on port 8000."
+    Stop-ProcessesOnPort -Ports @(3000)
 }
 
 $vite = Start-Process -PassThru -NoNewWindow -FilePath "cmd.exe" `
@@ -101,7 +93,7 @@ $vite = Start-Process -PassThru -NoNewWindow -FilePath "cmd.exe" `
     -WorkingDirectory $FRONTEND_DIR
 
 if (-not (Wait-ForHttpOk -Url "http://127.0.0.1:3000" -TimeoutSeconds 40)) {
-    Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue
+    Stop-Process -Id $vite.Id -Force -ErrorAction SilentlyContinue
     throw "Frontend did not become ready on port 3000."
 }
 
@@ -109,29 +101,20 @@ $electron = Start-Process -PassThru -NoNewWindow -FilePath "cmd.exe" `
     -ArgumentList "/c npx electron ." `
     -WorkingDirectory $FRONTEND_DIR
 
-$systemInfo = Get-SystemInfo
-$serverIp = "127.0.0.1"
-if ($systemInfo -and $systemInfo.server_ip) {
-    $serverIp = $systemInfo.server_ip
-}
-
 Write-Host ""
-Write-Host "EngageX Admin is running." -ForegroundColor Green
-Write-Host ("Backend:   http://{0}:8000" -f $serverIp)
-Write-Host "Frontend:  http://127.0.0.1:3000"
-Write-Host "Dashboard: http://127.0.0.1:3000/host"
+Write-Host "EngageX Participant is running." -ForegroundColor Green
+Write-Host "Frontend: http://127.0.0.1:3000"
+Write-Host "Join UI:  http://127.0.0.1:3000/participant"
 Write-Host ""
-Write-Host "Close this window to stop the admin stack."
+Write-Host "Use the admin laptop's server IP and session ID in the participant UI."
 
 try {
     while ($true) {
         Start-Sleep -Seconds 2
-        if ($backend.HasExited) { break }
         if ($vite.HasExited) { break }
         if ($electron.HasExited) { break }
     }
 } finally {
     Stop-Process -Id $electron.Id -Force -ErrorAction SilentlyContinue
     Stop-Process -Id $vite.Id -Force -ErrorAction SilentlyContinue
-    Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue
 }

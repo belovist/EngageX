@@ -5,8 +5,9 @@ import math
 import time
 import urllib.request
 
-URL = "http://127.0.0.1:8000/api/attention/score"
+SESSION_ID = "SES-DEMO123456"
 USER_ID = "student-01"
+URL = f"http://127.0.0.1:8000/api/sessions/{SESSION_ID}/scores"
 
 
 def main() -> None:
@@ -16,6 +17,7 @@ def main() -> None:
     while True:
         score = 70 + 18 * math.sin(i / 5.0)
         payload = {
+            "session_id": SESSION_ID,
             "user_id": USER_ID,
             "score": round(max(0, min(100, score)), 2),
             "timestamp": time.time(),

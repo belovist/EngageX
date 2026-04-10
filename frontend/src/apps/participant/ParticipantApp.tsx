@@ -1,105 +1,326 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from 'react'
 
-import { DEFAULT_PARTICIPANT_ID } from "../../shared/constants";
-import { useAttentionScores } from "../host/hooks/useAttentionScores";
-import { PersonalScore } from "./components/PersonalScore";
-import { WebcamPreview } from "./components/WebcamPreview";
+type ParticipantSummary = {
+  user_id: string
+  latest_score: number
+  average_score: number
+  total_samples: number
+  last_seen: number
+  latest_state?: string | null
+  pose_score?: number | null
+  gaze_score?: number | null
+}
+
+type SessionDetail = {
+  session: {
+    session_id: string
+    meeting_link: string
+  }
+  summary: {
+    participant_count: number
+    total_samples: number
+    average_score: number
+    last_updated: number
+  }
+  participants: ParticipantSummary[]
+}
+
+function normalizeServerUrl(input: string): string {
+  const trimmed = input.trim()
+  if (!trimmed) return ''
+
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
+  const url = new URL(withScheme)
+  if (!url.port) {
+    url.port = '8000'
+  }
+  return url.toString().replace(/\/$/, '')
+}
+
+function formatClock(timestamp: number | null | undefined): string {
+  if (!timestamp) return '--'
+  return new Date(timestamp * 1000).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
 
 export default function ParticipantApp() {
-  const [participantId, setParticipantId] = useState(DEFAULT_PARTICIPANT_ID);
-  const [previewEnabled, setPreviewEnabled] = useState(false);
-
-  const { participants, connected } = useAttentionScores();
-
-  // 🔥 Start Python client (Electron)
-  const handleJoin = () => {
-    window.api?.startClient();
-  };
-
-  const participantList = useMemo(() => Object.values(participants), [participants]);
+  const [serverInput, setServerInput] = useState(() => window.localStorage.getItem('engagex.participant.server') || '127.0.0.1:8000')
+  const [sessionId, setSessionId] = useState(() => window.localStorage.getItem('engagex.participant.sessionId') || '')
+  const [userId, setUserId] = useState(() => window.localStorage.getItem('engagex.participant.userId') || 'student-1')
+  const [statusMessage, setStatusMessage] = useState('Enter server IP, session ID, and user ID.')
+  const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null)
+  const [running, setRunning] = useState(false)
 
   useEffect(() => {
-    if (participants[participantId]) return;
+    window.localStorage.setItem('engagex.participant.server', serverInput)
+  }, [serverInput])
 
-    if (participantList.length > 0) {
-      setParticipantId(participantList[0].participant_id);
+  useEffect(() => {
+    window.localStorage.setItem('engagex.participant.sessionId', sessionId)
+  }, [sessionId])
+
+  useEffect(() => {
+    window.localStorage.setItem('engagex.participant.userId', userId)
+  }, [userId])
+
+  const serverUrl = useMemo(() => normalizeServerUrl(serverInput), [serverInput])
+
+  useEffect(() => {
+    if (!serverUrl || !sessionId.trim()) {
+      setSessionDetail(null)
+      return
     }
-  }, [participantId, participantList, participants]);
 
-  const me = useMemo(
-    () => participants[participantId] ?? participantList[0],
-    [participantId, participantList, participants]
-  );
+    let cancelled = false
+
+    const pollSession = async () => {
+      try {
+        const response = await fetch(`${serverUrl}/api/sessions/${encodeURIComponent(sessionId.trim())}?limit_per_user=10`, {
+          cache: 'no-store',
+        })
+
+        if (!response.ok) {
+          if (!cancelled) {
+            setSessionDetail(null)
+          }
+          return
+        }
+
+        const payload = (await response.json()) as SessionDetail
+        if (!cancelled) {
+          setSessionDetail(payload)
+        }
+      } catch {
+        if (!cancelled) {
+          setSessionDetail(null)
+        }
+      }
+    }
+
+    void pollSession()
+    const timer = window.setInterval(() => {
+      void pollSession()
+    }, 3000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [serverUrl, sessionId])
+
+  const me = useMemo(() => {
+    if (!sessionDetail) return null
+    return sessionDetail.participants.find((participant) => participant.user_id === userId.trim()) || null
+  }, [sessionDetail, userId])
+
+  const handleStart = async () => {
+    const trimmedSessionId = sessionId.trim()
+    const trimmedUserId = userId.trim()
+
+    if (!serverUrl || !trimmedSessionId || !trimmedUserId) {
+      setStatusMessage('All fields are required.')
+      return
+    }
+
+    try {
+      const validateResponse = await fetch(
+        `${serverUrl}/api/sessions/${encodeURIComponent(trimmedSessionId)}?limit_per_user=5`,
+        { cache: 'no-store' }
+      )
+
+      if (!validateResponse.ok) {
+        setStatusMessage('Session not found on admin laptop.')
+        setRunning(false)
+        return
+      }
+    } catch {
+      setStatusMessage('Could not reach the admin laptop.')
+      setRunning(false)
+      return
+    }
+
+    const result = window.api?.startClient({
+      sessionId: trimmedSessionId,
+      userId: trimmedUserId,
+      serverUrl,
+      intervalSec: 3,
+      cameraId: 0,
+      preview: false,
+    })
+
+    if (!result?.ok) {
+      setStatusMessage(result?.error || 'Desktop client bridge is unavailable.')
+      setRunning(false)
+      return
+    }
+
+    setRunning(true)
+    setStatusMessage(`Client running for ${trimmedUserId} in ${trimmedSessionId}.`)
+  }
+
+  const handleStop = () => {
+    window.api?.stopClient()
+    setRunning(false)
+    setStatusMessage('Client stopped.')
+  }
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        
-        {/* HEADER */}
-        <header className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-            EngageX Participant View
+    <main className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-5 py-6 lg:px-8">
+        <section className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-slate-950/40">
+          <p className="text-xs uppercase tracking-[0.22em] text-emerald-300">Participant</p>
+          <h1 className="mt-2 text-4xl font-semibold text-white">EngageX LAN Client</h1>
+          <p className="mt-2 text-sm text-slate-400">
+            Connect to the admin laptop over the same Wi-Fi, then send lightweight JSON attention scores every few seconds.
           </p>
 
-          <h1 className="mt-2 text-2xl font-semibold">
-            Personal Focus Monitor
-          </h1>
-
-          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <label className="flex items-center gap-2 text-sm text-slate-600">
-              Participant ID
+          <div className="mt-6 grid gap-4 md:grid-cols-3">
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+              <label className="text-xs uppercase tracking-[0.22em] text-slate-500">Server IP</label>
               <input
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                value={participantId}
-                onChange={(e) => setParticipantId(e.target.value)}
+                value={serverInput}
+                onChange={(event) => setServerInput(event.target.value)}
+                placeholder="192.168.0.25:8000"
+                className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:border-emerald-500"
               />
-            </label>
+            </div>
 
-            <span
-              className={`text-xs font-semibold ${
-                connected ? "text-emerald-600" : "text-amber-600"
-              }`}
-            >
-              {connected ? "Realtime connected" : "Waiting for AI..."}
-            </span>
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+              <label className="text-xs uppercase tracking-[0.22em] text-slate-500">Session ID</label>
+              <input
+                value={sessionId}
+                onChange={(event) => setSessionId(event.target.value)}
+                placeholder="SES-XXXXXXXXXX"
+                className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+              <label className="text-xs uppercase tracking-[0.22em] text-slate-500">User ID</label>
+              <input
+                value={userId}
+                onChange={(event) => setUserId(event.target.value)}
+                placeholder="student-1"
+                className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:border-emerald-500"
+              />
+            </div>
           </div>
 
-          <p className="mt-2 text-xs text-slate-500">
-            {me
-              ? `Showing score for ${me.participant_id}`
-              : "Waiting for attention score from AI model..."}
-          </p>
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+            <button
+              onClick={handleStart}
+              className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
+            >
+              Start Local Client
+            </button>
+            <button
+              onClick={handleStop}
+              className="rounded-xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:border-slate-500"
+            >
+              Stop Client
+            </button>
+          </div>
 
-          {/* CAMERA WARNING */}
-          <div className="mt-3 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-            <p className="text-xs text-amber-800">
-              Turn OFF preview for accurate AI scoring.
+          <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+            <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Status</p>
+            <p className={`mt-2 text-lg font-semibold ${running ? 'text-emerald-300' : 'text-amber-300'}`}>
+              {statusMessage}
             </p>
-            <button
-              onClick={() => setPreviewEnabled((prev) => !prev)}
-              className="ml-3 rounded-md border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900"
-            >
-              {previewEnabled ? "Disable Preview" : "Enable Preview"}
-            </button>
+            <p className="mt-2 text-xs text-slate-500">{serverUrl || 'Waiting for a valid backend URL'}</p>
+          </div>
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
+            <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Session</p>
+            <h2 className="mt-2 text-2xl font-semibold text-white">
+              {sessionDetail?.session.session_id || 'Waiting for admin session'}
+            </h2>
+            <p className="mt-2 break-all text-sm text-slate-400">
+              {sessionDetail?.session.meeting_link || 'The admin laptop has not exposed this session yet.'}
+            </p>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+              {[
+                { label: 'Participants', value: sessionDetail?.summary.participant_count ?? 0, tone: 'text-sky-300' },
+                { label: 'Scores', value: sessionDetail?.summary.total_samples ?? 0, tone: 'text-emerald-300' },
+                { label: 'Updated', value: formatClock(sessionDetail?.summary.last_updated), tone: 'text-amber-300' },
+              ].map((item) => (
+                <div key={item.label} className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+                  <p className="text-xs uppercase tracking-[0.22em] text-slate-500">{item.label}</p>
+                  <p className={`mt-3 text-2xl font-semibold ${item.tone}`}>{item.value}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 overflow-hidden rounded-2xl border border-slate-800">
+              <table className="min-w-full divide-y divide-slate-800 text-sm">
+                <thead className="bg-slate-950/80 text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium">User</th>
+                    <th className="px-4 py-3 text-left font-medium">Latest</th>
+                    <th className="px-4 py-3 text-left font-medium">Average</th>
+                    <th className="px-4 py-3 text-left font-medium">Last Seen</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 bg-slate-950/40">
+                  {(sessionDetail?.participants || []).map((participant) => (
+                    <tr key={participant.user_id}>
+                      <td className="px-4 py-3">
+                        <p className="font-semibold text-white">{participant.user_id}</p>
+                        <p className="text-xs text-slate-500">{participant.latest_state || 'No state'}</p>
+                      </td>
+                      <td className="px-4 py-3 text-emerald-300">{participant.latest_score.toFixed(0)}%</td>
+                      <td className="px-4 py-3 text-slate-200">{participant.average_score.toFixed(0)}%</td>
+                      <td className="px-4 py-3 text-slate-400">{formatClock(participant.last_seen)}</td>
+                    </tr>
+                  ))}
+
+                  {!sessionDetail?.participants.length && (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-10 text-center text-sm text-slate-500">
+                        Waiting for the admin session to appear.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          {/* 🔥 JOIN BUTTON */}
-          <div className="mt-4">
-            <button
-              onClick={handleJoin}
-              className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-            >
-              Start Camera & Join Session
-            </button>
-          </div>
-        </header>
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
+            <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Your Latest Score</p>
+            <h2 className="mt-2 text-2xl font-semibold text-white">{me?.user_id || userId || 'Unknown user'}</h2>
 
-        {/* CONTENT */}
-        <div className="grid gap-4">
-          {previewEnabled && <WebcamPreview />}
-          <PersonalScore participant={me} />
-        </div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {[
+                { label: 'Latest', value: me ? `${me.latest_score.toFixed(0)}%` : '--', tone: 'text-emerald-300' },
+                { label: 'Average', value: me ? `${me.average_score.toFixed(0)}%` : '--', tone: 'text-sky-300' },
+                { label: 'Pose', value: me?.pose_score != null ? `${Math.round(me.pose_score * 100)}%` : '--', tone: 'text-violet-300' },
+                { label: 'Gaze', value: me?.gaze_score != null ? `${Math.round(me.gaze_score * 100)}%` : '--', tone: 'text-amber-300' },
+              ].map((item) => (
+                <div key={item.label} className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+                  <p className="text-xs uppercase tracking-[0.22em] text-slate-500">{item.label}</p>
+                  <p className={`mt-3 text-2xl font-semibold ${item.tone}`}>{item.value}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Session Instructions</p>
+              <ol className="mt-3 space-y-2 text-sm text-slate-300">
+                <li>1. Get the server IP and session ID from the admin laptop.</li>
+                <li>2. Enter them here with your user ID.</li>
+                <li>3. Start the local client to send JSON scores over the LAN.</li>
+              </ol>
+            </div>
+          </div>
+        </section>
       </div>
     </main>
-  );
+  )
 }

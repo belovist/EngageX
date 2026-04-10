@@ -7,7 +7,6 @@ PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
 
 INSTALL_FRONTEND_DEPS="false"
 CLEAN_PORTS="false"
-BACKEND_PID=""
 VITE_PID=""
 ELECTRON_PID=""
 
@@ -42,7 +41,6 @@ done
 cleanup() {
   [[ -n "$ELECTRON_PID" ]] && kill "$ELECTRON_PID" 2>/dev/null || true
   [[ -n "$VITE_PID" ]] && kill "$VITE_PID" 2>/dev/null || true
-  [[ -n "$BACKEND_PID" ]] && kill "$BACKEND_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
@@ -61,29 +59,17 @@ if [[ "$INSTALL_FRONTEND_DEPS" == "true" || ! -d "$FRONTEND_DIR/node_modules" ]]
   )
 fi
 
+if [[ ! -f "$REPO_ROOT/models/l2cs_net.onnx" || ! -f "$REPO_ROOT/models/face_landmarker.task" ]]; then
+  (
+    cd "$REPO_ROOT"
+    "$PYTHON_BIN" "$REPO_ROOT/setup_models.py"
+  )
+fi
+
 if [[ "$CLEAN_PORTS" == "true" ]]; then
   if command -v lsof >/dev/null 2>&1; then
     lsof -ti:3000 | xargs kill -9 2>/dev/null || true
-    lsof -ti:8000 | xargs kill -9 2>/dev/null || true
   fi
-fi
-
-(
-  cd "$REPO_ROOT"
-  exec "$PYTHON_BIN" -m uvicorn backend.server:app --host 0.0.0.0 --port 8000 --reload
-) &
-BACKEND_PID=$!
-
-for _ in {1..30}; do
-  if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
-
-if ! curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
-  echo "Backend did not become ready on port 8000." >&2
-  exit 1
 fi
 
 (
@@ -110,14 +96,11 @@ fi
 ) &
 ELECTRON_PID=$!
 
-SERVER_IP="$(curl -fsS http://127.0.0.1:8000/api/system/info 2>/dev/null | "$PYTHON_BIN" -c "import json,sys; data=json.load(sys.stdin); print(data.get('server_ip','127.0.0.1'))" 2>/dev/null || echo 127.0.0.1)"
-
 echo ""
-echo "EngageX Admin is running."
-echo "Backend:   http://$SERVER_IP:8000"
-echo "Frontend:  http://127.0.0.1:3000"
-echo "Dashboard: http://127.0.0.1:3000/host"
+echo "EngageX Participant is running."
+echo "Frontend: http://127.0.0.1:3000"
+echo "Join UI:  http://127.0.0.1:3000/participant"
 echo ""
-echo "Press Ctrl+C to stop."
+echo "Use the admin laptop's server IP and session ID in the participant UI."
 
 wait

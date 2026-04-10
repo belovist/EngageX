@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiUrl } from '../config';
 
 export type DistributedUser = {
@@ -20,17 +20,12 @@ export type DistributedAnalytics = {
   updated_at: number;
 };
 
-type DistributedPayload = {
-  users: DistributedUser[];
-  analytics: DistributedAnalytics;
-};
-
 type UsersResponse = {
   count: number;
   users: DistributedUser[];
 };
 
-type ConnectionState = 'connecting' | 'live' | 'polling' | 'offline';
+type ConnectionState = 'polling' | 'offline';
 
 const EMPTY_ANALYTICS: DistributedAnalytics = {
   active_users: 0,
@@ -45,14 +40,7 @@ export function useDistributedAttentionStream() {
   const [users, setUsers] = useState<DistributedUser[]>([]);
   const [analytics, setAnalytics] = useState<DistributedAnalytics>(EMPTY_ANALYTICS);
   const [backendOk, setBackendOk] = useState(false);
-  const [connection, setConnection] = useState<ConnectionState>('connecting');
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const applyPayload = useCallback((payload: DistributedPayload) => {
-    setUsers(Array.isArray(payload.users) ? payload.users : []);
-    setAnalytics(payload.analytics ?? EMPTY_ANALYTICS);
-    setBackendOk(true);
-  }, []);
+  const [connection, setConnection] = useState<ConnectionState>('polling');
 
   const fetchSnapshot = useCallback(async () => {
     try {
@@ -63,95 +51,32 @@ export function useDistributedAttentionStream() {
 
       if (!usersResponse.ok || !analyticsResponse.ok) {
         setBackendOk(false);
+        setConnection('offline');
         return false;
       }
 
       const usersPayload = (await usersResponse.json()) as UsersResponse;
       const analyticsPayload = (await analyticsResponse.json()) as DistributedAnalytics;
-      applyPayload({
-        users: Array.isArray(usersPayload.users) ? usersPayload.users : [],
-        analytics: analyticsPayload,
-      });
+      setUsers(Array.isArray(usersPayload.users) ? usersPayload.users : []);
+      setAnalytics(analyticsPayload ?? EMPTY_ANALYTICS);
+      setBackendOk(true);
+      setConnection('polling');
       return true;
     } catch {
       setBackendOk(false);
+      setConnection('offline');
       return false;
     }
-  }, [applyPayload]);
+  }, []);
 
   useEffect(() => {
-    let es: EventSource | null = null;
+    void fetchSnapshot();
+    const timer = window.setInterval(() => {
+      void fetchSnapshot();
+    }, 3000);
 
-    const startPolling = () => {
-      if (pollRef.current) return;
-
-      const tick = async () => {
-        const ok = await fetchSnapshot();
-        setConnection(ok ? 'polling' : 'offline');
-      };
-
-      setConnection('polling');
-      void tick();
-      pollRef.current = setInterval(() => {
-        void tick();
-      }, 1000);
-    };
-
-    const tryHealth = async () => {
-      try {
-        const response = await fetch(apiUrl('/health'), { cache: 'no-store' });
-        setBackendOk(response.ok);
-        return response.ok;
-      } catch {
-        setBackendOk(false);
-        return false;
-      }
-    };
-
-    (async () => {
-      const healthy = await tryHealth();
-      if (!healthy) {
-        setConnection('offline');
-        startPolling();
-        return;
-      }
-
-      await fetchSnapshot();
-      setConnection('connecting');
-      es = new EventSource(apiUrl('/api/attention/distributed/stream'));
-
-      es.onopen = () => {
-        setConnection('live');
-        if (pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
-      };
-
-      es.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data) as DistributedPayload;
-          applyPayload(payload);
-        } catch {
-          // Ignore malformed events and keep stream alive.
-        }
-      };
-
-      es.onerror = () => {
-        es?.close();
-        es = null;
-        startPolling();
-      };
-    })();
-
-    return () => {
-      es?.close();
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
-  }, [applyPayload, fetchSnapshot]);
+    return () => window.clearInterval(timer);
+  }, [fetchSnapshot]);
 
   return { users, analytics, backendOk, connection };
 }
