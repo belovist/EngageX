@@ -29,12 +29,16 @@ function normalizeServerUrl(input: string): string {
   const trimmed = input.trim()
   if (!trimmed) return ''
 
-  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
-  const url = new URL(withScheme)
-  if (!url.port) {
-    url.port = '8000'
+  try {
+    const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
+    const url = new URL(withScheme)
+    if (!url.port) {
+      url.port = '8000'
+    }
+    return url.toString().replace(/\/$/, '')
+  } catch {
+    return ''
   }
-  return url.toString().replace(/\/$/, '')
 }
 
 function formatClock(timestamp: number | null | undefined): string {
@@ -45,6 +49,48 @@ function formatClock(timestamp: number | null | undefined): string {
     second: '2-digit',
     hour12: false,
   })
+}
+
+async function fetchSessionDetail(serverUrl: string, sessionId: string, limitPerUser = 10) {
+  const trimmedSessionId = sessionId.trim()
+  if (!serverUrl || !trimmedSessionId) {
+    return { ok: false, status: 0, error: 'Missing server URL or session ID.' }
+  }
+
+  if (window.api?.fetchSession) {
+    const response = await window.api.fetchSession({
+      serverUrl,
+      sessionId: trimmedSessionId,
+      limitPerUser,
+    })
+
+    if (response.ok && response.data) {
+      return { ok: true, status: response.status, data: response.data as SessionDetail }
+    }
+
+    return { ok: false, status: response.status, error: response.error || 'Request failed.' }
+  }
+
+  try {
+    const response = await fetch(`${serverUrl}/api/sessions/${encodeURIComponent(trimmedSessionId)}?limit_per_user=${limitPerUser}`, {
+      cache: 'no-store',
+    })
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { detail?: string } | null
+      return {
+        ok: false,
+        status: response.status,
+        error: payload?.detail || `Request failed with status ${response.status}.`,
+      }
+    }
+
+    const payload = (await response.json()) as SessionDetail
+    return { ok: true, status: response.status, data: payload }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Request failed.'
+    return { ok: false, status: 0, error: message }
+  }
 }
 
 export default function ParticipantApp() {
@@ -78,26 +124,16 @@ export default function ParticipantApp() {
     let cancelled = false
 
     const pollSession = async () => {
-      try {
-        const response = await fetch(`${serverUrl}/api/sessions/${encodeURIComponent(sessionId.trim())}?limit_per_user=10`, {
-          cache: 'no-store',
-        })
-
-        if (!response.ok) {
-          if (!cancelled) {
-            setSessionDetail(null)
-          }
-          return
-        }
-
-        const payload = (await response.json()) as SessionDetail
-        if (!cancelled) {
-          setSessionDetail(payload)
-        }
-      } catch {
+      const result = await fetchSessionDetail(serverUrl, sessionId, 10)
+      if (!result.ok) {
         if (!cancelled) {
           setSessionDetail(null)
         }
+        return
+      }
+
+      if (!cancelled) {
+        setSessionDetail(result.data)
       }
     }
 
@@ -126,19 +162,13 @@ export default function ParticipantApp() {
       return
     }
 
-    try {
-      const validateResponse = await fetch(
-        `${serverUrl}/api/sessions/${encodeURIComponent(trimmedSessionId)}?limit_per_user=5`,
-        { cache: 'no-store' }
-      )
-
-      if (!validateResponse.ok) {
+    const validation = await fetchSessionDetail(serverUrl, trimmedSessionId, 5)
+    if (!validation.ok) {
+      if (validation.status === 404) {
         setStatusMessage('Session not found on admin laptop.')
-        setRunning(false)
-        return
+      } else {
+        setStatusMessage(`Could not reach the admin laptop at ${serverUrl}.`)
       }
-    } catch {
-      setStatusMessage('Could not reach the admin laptop.')
       setRunning(false)
       return
     }

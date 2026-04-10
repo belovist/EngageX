@@ -16,6 +16,12 @@ function Get-HostPython {
     throw "Python is not installed."
 }
 
+function Test-IsAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
 function Ensure-PythonEnv {
     if (-not (Test-Path $PYTHON_BIN)) {
         & (Get-HostPython) -m venv (Join-Path $REPO_ROOT ".venv")
@@ -80,16 +86,46 @@ function Get-SystemInfo {
     }
 }
 
+function Ensure-LanFirewallAccess {
+    $ruleName = "EngageX LAN Backend TCP 8000"
+    try {
+        $existingRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+        if ($existingRule) {
+            return
+        }
+    } catch {}
+
+    if (-not (Test-IsAdministrator)) {
+        Write-Host "Windows Firewall was not updated automatically. Run PowerShell as Administrator once if participant laptops still cannot reach port 8000." -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        New-NetFirewallRule `
+            -DisplayName $ruleName `
+            -Direction Inbound `
+            -Action Allow `
+            -Enabled True `
+            -Profile Private `
+            -Protocol TCP `
+            -LocalPort 8000 | Out-Null
+        Write-Host "Opened Windows Firewall for EngageX LAN access on port 8000." -ForegroundColor Green
+    } catch {
+        Write-Host ("Could not configure Windows Firewall automatically: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+    }
+}
+
 Write-Host "Starting EngageX Admin..." -ForegroundColor Cyan
 Ensure-PythonEnv
 Ensure-FrontendDeps
+Ensure-LanFirewallAccess
 
 if ($CleanPorts) {
     Stop-ProcessesOnPort -Ports @(3000, 8000)
 }
 
 $backend = Start-Process -PassThru -NoNewWindow -FilePath $PYTHON_BIN `
-    -ArgumentList "-m uvicorn backend.server:app --host 0.0.0.0 --port 8000 --reload" `
+    -ArgumentList "-m uvicorn backend.server:app --host 0.0.0.0 --port 8000" `
     -WorkingDirectory $REPO_ROOT
 
 if (-not (Wait-ForHttpOk -Url "http://127.0.0.1:8000/health" -TimeoutSeconds 30)) {

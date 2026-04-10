@@ -70,7 +70,7 @@ fi
 
 (
   cd "$REPO_ROOT"
-  exec "$PYTHON_BIN" -m uvicorn backend.server:app --host 0.0.0.0 --port 8000 --reload
+  exec "$PYTHON_BIN" -m uvicorn backend.server:app --host 0.0.0.0 --port 8000
 ) &
 BACKEND_PID=$!
 
