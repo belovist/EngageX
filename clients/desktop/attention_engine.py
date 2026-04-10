@@ -7,8 +7,8 @@ from core.score_calculator import AttentivenessScoreCalculator
 class AttentionEngine:
     def __init__(self):
         self.calculator = AttentivenessScoreCalculator(
-            head_pose_weight=0.6,
-            gaze_weight=0.4,
+            head_pose_weight=0.75,
+            gaze_weight=0.25,
             ema_alpha=0.3,
         )
 

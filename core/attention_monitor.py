@@ -19,8 +19,8 @@ class AttentionMonitor:
         camera_id=0,
         yolo_model="yolov8n.pt",
         gaze_model_path=None,
-        head_pose_weight=0.6,
-        gaze_weight=0.4,
+        head_pose_weight=0.75,
+        gaze_weight=0.25,
         ema_alpha=0.3,
         display=True,
     ):
@@ -290,8 +290,8 @@ def main():
     monitor = AttentionMonitor(
         camera_id=0,
         display=True,
-        head_pose_weight=0.6,
-        gaze_weight=0.4,
+        head_pose_weight=0.75,
+        gaze_weight=0.25,
         ema_alpha=0.3,
     )
     monitor.run()

@@ -119,6 +119,7 @@ class GazeTracker:
         pitch_score = max(0.0, 1.0 - (pitch_deviation / pitch_threshold))
 
         gaze_score = 0.5 * yaw_score + 0.5 * pitch_score
+        gaze_score*=2;
 
         return np.clip(gaze_score, 0.0, 1.0)
 
