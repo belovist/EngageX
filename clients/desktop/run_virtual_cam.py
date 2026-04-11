@@ -50,7 +50,7 @@ def post_score_event(base_url, payload):
     try:
         with urllib.request.urlopen(request, timeout=4) as response:
             return 200 <= int(response.status) < 300
-    except:
+    except (urllib.error.URLError, TimeoutError, OSError):
         return False
 
 
@@ -94,7 +94,7 @@ def process_frame(frame, engine, detector, headpose, gaze, session_id, user_id):
 def main():
     args = parse_args()
 
-    capture = CameraCapture(camera_id=args.camera_id)
+    capture = CameraCapture(camera_id=args.camera_id, width=args.width, height=args.height)
     vcam = VirtualCamOutput(width=args.width, height=args.height, fps=args.fps)
 
     engine = AttentionEngine()
@@ -105,19 +105,43 @@ def main():
     capture.start()
     vcam.start()
 
-    print("✅ Virtual camera started")
+    print("Virtual camera started")
+    print(
+        f"Using webcam index {capture.camera_id} via {capture.backend_name} and publishing "
+        f"{args.width}x{args.height}@{args.fps}"
+    )
     print("Press Ctrl+C to stop")
 
-    last_send = 0
+    last_send = 0.0
+    consecutive_empty_frames = 0
 
     try:
         while True:
             frame = capture.read()
 
             if frame is None:
-                time.sleep(0.01)
+                consecutive_empty_frames += 1
+                if consecutive_empty_frames == 1 or consecutive_empty_frames % 30 == 0:
+                    print(
+                        f"No frame received from webcam index {capture.camera_id}. "
+                        "Make sure OBS, Zoom, Meet, or a browser is not holding the real camera."
+                    )
+
+                if consecutive_empty_frames >= max(10, args.fps):
+                    print("Trying to reopen the webcam...")
+                    try:
+                        capture.restart()
+                        print(f"Recovered webcam on index {capture.camera_id} via {capture.backend_name}")
+                        consecutive_empty_frames = 0
+                    except RuntimeError as exc:
+                        print(f"Webcam recovery failed: {exc}")
+                        time.sleep(1.0)
+                        continue
+
+                time.sleep(0.05)
                 continue
 
+            consecutive_empty_frames = 0
             frame = frame.copy()
 
             processed, event = process_frame(
@@ -130,20 +154,21 @@ def main():
                 args.user_id,
             )
 
-            processed = processed.copy()
-            processed = cv2.resize(processed, (args.width, args.height))
-            processed = cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)
-            processed = np.ascontiguousarray(processed)
+            preview_frame = cv2.resize(processed, (args.width, args.height))
+            output_frame = cv2.cvtColor(preview_frame, cv2.COLOR_BGR2RGB)
+            output_frame = np.ascontiguousarray(output_frame)
 
-            vcam.push(processed)
+            vcam.push(output_frame)
 
             now = time.time()
             if now - last_send >= args.send_interval:
-                post_score_event(args.backend_url, event)
+                sent = post_score_event(args.backend_url, event)
+                if not sent:
+                    print(f"Warning: could not send score to {args.backend_url.rstrip('/')}")
                 last_send = now
 
             if args.show_preview:
-                cv2.imshow("Preview", processed)
+                cv2.imshow("EngageX Virtual Camera Preview", preview_frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 

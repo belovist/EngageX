@@ -148,11 +148,14 @@ The desktop app now starts this for you from the participant UI, but you can sti
 
 After virtual camera mode starts:
 
-1. Open Zoom, Meet, Teams, or OBS.
-2. Select the virtual camera device exposed on the participant laptop.
-3. Keep the EngageX participant process running.
+1. Start the admin backend first, then start EngageX virtual camera mode on the participant laptop.
+2. Let EngageX own the real webcam.
+3. Open Zoom, Meet, Teams, or OBS after EngageX is already running.
+4. In that app, select the virtual camera device exposed on the participant laptop.
+5. Keep the EngageX participant process running.
 
 Do not run `Start Local Client` and `Start Virtual Camera` at the same time on the same participant laptop.
+Do not also add the real webcam as an OBS source while EngageX virtual camera mode is running, or the model can lose camera access.
 
 ## Manual Setup
 
@@ -272,12 +275,14 @@ Notes:
 - Close Zoom, Meet, Teams, OBS, or any browser tab that is already using the webcam.
 - Try another camera index.
 - On Windows, allow camera access in system privacy settings.
+- If the local preview says no frames are coming in, the real webcam is usually being held by another app.
 
 ### Virtual camera does not show up in the meeting app
 
 - Start the EngageX virtual camera first.
 - Then reopen Zoom, Meet, Teams, or OBS.
 - Make sure `pyvirtualcam` is installed in the participant laptop's `.venv`.
+- Use the EngageX preview window for validation when possible. OBS is not a reliable place to verify its own virtual-camera output while also trying to provide the backend.
 
 ### Participant can reach the UI but cannot send data
 

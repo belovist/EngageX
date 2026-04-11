@@ -99,6 +99,7 @@ export default function ParticipantApp() {
   const [serverInput, setServerInput] = useState(() => window.localStorage.getItem('engagex.participant.server') || '127.0.0.1:8000')
   const [sessionId, setSessionId] = useState(() => window.localStorage.getItem('engagex.participant.sessionId') || '')
   const [userId, setUserId] = useState(() => window.localStorage.getItem('engagex.participant.userId') || 'student-1')
+  const [showPreview, setShowPreview] = useState(() => window.localStorage.getItem('engagex.participant.preview') === '1')
   const [statusMessage, setStatusMessage] = useState('Enter server IP, session ID, and user ID.')
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null)
   const [runningMode, setRunningMode] = useState<RunMode | null>(null)
@@ -114,6 +115,10 @@ export default function ParticipantApp() {
   useEffect(() => {
     window.localStorage.setItem('engagex.participant.userId', userId)
   }, [userId])
+
+  useEffect(() => {
+    window.localStorage.setItem('engagex.participant.preview', showPreview ? '1' : '0')
+  }, [showPreview])
 
   const serverUrl = useMemo(() => normalizeServerUrl(serverInput), [serverInput])
 
@@ -183,7 +188,7 @@ export default function ParticipantApp() {
             serverUrl,
             intervalSec: 3,
             cameraId: 0,
-            preview: false,
+            preview: showPreview,
           })
         : window.api?.startClient({
             sessionId: trimmedSessionId,
@@ -191,7 +196,7 @@ export default function ParticipantApp() {
             serverUrl,
             intervalSec: 3,
             cameraId: 0,
-            preview: false,
+            preview: showPreview,
           })
 
     if (!result?.ok) {
@@ -284,8 +289,18 @@ export default function ParticipantApp() {
             </button>
           </div>
 
+          <label className="mt-4 flex items-center gap-3 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={showPreview}
+              onChange={(event) => setShowPreview(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-700 bg-slate-950 text-emerald-400 focus:ring-emerald-500"
+            />
+            Show local preview window while the model is running
+          </label>
+
           <p className="mt-3 text-xs text-slate-500">
-            Use local client mode for score-only LAN updates. Use virtual camera mode when Zoom, Meet, Teams, or OBS on this laptop needs a camera source.
+            Use local client mode for score-only LAN updates. For virtual camera mode, start EngageX first, then open Zoom, Meet, Teams, or OBS and select the virtual camera there. Do not let another app grab the real webcam first. The preview window is the best sanity check if OBS shows a black self-preview.
           </p>
 
           <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
@@ -382,7 +397,7 @@ export default function ParticipantApp() {
                 <li>1. Get the server IP and session ID from the admin laptop.</li>
                 <li>2. Enter them here with your user ID.</li>
                 <li>3. Start Local Client for score-only LAN mode.</li>
-                <li>4. Start Virtual Camera when a meeting app on this laptop needs the EngageX camera feed.</li>
+                <li>4. Start Virtual Camera before opening the meeting app that should use the EngageX camera feed.</li>
               </ol>
             </div>
           </div>

@@ -1,5 +1,5 @@
-import pyvirtualcam
 import numpy as np
+import pyvirtualcam
 
 
 class VirtualCamOutput:
@@ -15,15 +15,15 @@ class VirtualCamOutput:
             height=self.height,
             fps=self.fps,
         )
-        print("✅ Virtual camera initialized")
+        print("Virtual camera initialized")
 
     def push(self, frame):
         if self.cam:
-            frame = np.ascontiguousarray(frame)  # IMPORTANT
+            frame = np.ascontiguousarray(frame)
             self.cam.send(frame)
             self.cam.sleep_until_next_frame()
 
     def stop(self):
         if self.cam:
             self.cam.close()
-            print("🛑 Virtual camera stopped")
+            print("Virtual camera stopped")
