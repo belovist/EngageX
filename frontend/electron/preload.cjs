@@ -144,39 +144,169 @@ function stopClientProcess() {
   return true
 }
 
-function startPythonModule(moduleName, moduleArgs, logPrefix) {
+function summarizeProcessOutput(stderrLines, stdoutLines) {
+  return [...stderrLines.slice(-6), ...stdoutLines.slice(-4)]
+    .map((line) => String(line || '').trim())
+    .filter(Boolean)
+    .join(' | ')
+}
+
+function attachLineLogger(stream, onLine) {
+  if (!stream) {
+    return () => {}
+  }
+
+  stream.setEncoding('utf8')
+  let buffer = ''
+
+  stream.on('data', (chunk) => {
+    buffer += String(chunk)
+    const lines = buffer.split(/\r?\n/)
+    buffer = lines.pop() || ''
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim()
+      if (line) {
+        onLine(line)
+      }
+    }
+  })
+
+  return () => {
+    const finalLine = buffer.trim()
+    if (finalLine) {
+      onLine(finalLine)
+    }
+  }
+}
+
+function startPythonModule(moduleName, moduleArgs, logPrefix, options = {}) {
   stopClientProcess()
 
   const pythonExe = resolvePythonExecutable()
-  clientProcess = spawn(
-    pythonExe,
-    ['-m', moduleName, ...moduleArgs],
-    {
-      cwd: repoRoot,
-      shell: false,
-      windowsHide: false,
+  const readyPrefix = typeof options.readyPrefix === 'string' ? options.readyPrefix : ''
+  const startupDelayMs = Number.isFinite(Number(options.startupDelayMs)) ? Number(options.startupDelayMs) : 1000
+  const readyTimeoutMs = Number.isFinite(Number(options.readyTimeoutMs)) ? Number(options.readyTimeoutMs) : 15000
+
+  return new Promise((resolve) => {
+    const stdoutLines = []
+    const stderrLines = []
+    let settled = false
+    let timer = null
+
+    const child = spawn(
+      pythonExe,
+      ['-u', '-m', moduleName, ...moduleArgs],
+      {
+        cwd: repoRoot,
+        shell: false,
+        windowsHide: false,
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: '1',
+        },
+      }
+    )
+
+    clientProcess = child
+
+    const rememberLine = (bucket, line) => {
+      bucket.push(line)
+      if (bucket.length > 40) {
+        bucket.shift()
+      }
     }
-  )
 
-  clientProcess.stdout?.on('data', (data) => {
-    console.log(`[${logPrefix}] ${String(data).trim()}`)
+    const finish = (result) => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      if (timer) {
+        clearTimeout(timer)
+      }
+      resolve(result)
+    }
+
+    const maybeResolveReadyLine = (line) => {
+      if (!readyPrefix || !line.startsWith(readyPrefix)) {
+        return
+      }
+
+      const payloadText = line.slice(readyPrefix.length).trim()
+      if (!payloadText) {
+        finish({ ok: true })
+        return
+      }
+
+      try {
+        finish({ ok: true, ...JSON.parse(payloadText) })
+      } catch {
+        finish({ ok: true, raw: payloadText })
+      }
+    }
+
+    const flushStdout = attachLineLogger(child.stdout, (line) => {
+      rememberLine(stdoutLines, line)
+      console.log(`[${logPrefix}] ${line}`)
+      maybeResolveReadyLine(line)
+    })
+
+    const flushStderr = attachLineLogger(child.stderr, (line) => {
+      rememberLine(stderrLines, line)
+      console.error(`[${logPrefix}] ${line}`)
+    })
+
+    child.on('error', (error) => {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`[${logPrefix}] failed to start: ${message}`)
+      if (clientProcess === child) {
+        clientProcess = null
+      }
+      finish({ ok: false, error: message })
+    })
+
+    child.on('exit', (code, signal) => {
+      flushStdout()
+      flushStderr()
+      console.log(`${logPrefix} exited with code ${code}${signal ? ` signal ${signal}` : ''}`)
+      if (clientProcess === child) {
+        clientProcess = null
+      }
+
+      if (!settled) {
+        const details = summarizeProcessOutput(stderrLines, stdoutLines)
+        finish({
+          ok: false,
+          error: details || `${logPrefix} exited with code ${code ?? 'unknown'}.`,
+        })
+      }
+    })
+
+    timer = setTimeout(() => {
+      const isRunning = child.exitCode == null && !child.killed
+      if (!isRunning) {
+        const details = summarizeProcessOutput(stderrLines, stdoutLines)
+        finish({
+          ok: false,
+          error: details || `${logPrefix} exited before it finished starting.`,
+        })
+        return
+      }
+
+      if (!readyPrefix) {
+        finish({ ok: true })
+        return
+      }
+
+      const details = summarizeProcessOutput(stderrLines, stdoutLines)
+      finish({
+        ok: false,
+        error: details || `Timed out waiting for ${logPrefix} to start.`,
+      })
+    }, readyPrefix ? readyTimeoutMs : startupDelayMs)
   })
-
-  clientProcess.stderr?.on('data', (data) => {
-    console.error(`[${logPrefix}] ${String(data).trim()}`)
-  })
-
-  clientProcess.on('error', (error) => {
-    console.error(`[${logPrefix}] failed to start: ${error instanceof Error ? error.message : String(error)}`)
-    clientProcess = null
-  })
-
-  clientProcess.on('exit', (code) => {
-    console.log(`${logPrefix} exited with code ${code}`)
-    clientProcess = null
-  })
-
-  return { ok: true }
 }
 
 contextBridge.exposeInMainWorld('api', {
@@ -230,7 +360,10 @@ contextBridge.exposeInMainWorld('api', {
         interval,
         ...(preview ? ['--display'] : []),
       ],
-      'participant-client'
+      'participant-client',
+      {
+        startupDelayMs: 1200,
+      }
     )
   },
   startVirtualCamera: (config = {}) => {
@@ -269,7 +402,11 @@ contextBridge.exposeInMainWorld('api', {
         interval,
         ...(preview ? ['--show-preview'] : []),
       ],
-      'participant-virtual-camera'
+      'participant-virtual-camera',
+      {
+        readyPrefix: 'ENGAGEX_READY ',
+        readyTimeoutMs: 20000,
+      }
     )
   },
   stopClient: () => ({ ok: stopClientProcess() }),

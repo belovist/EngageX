@@ -5,7 +5,6 @@ import urllib.error
 import urllib.request
 
 import cv2
-import numpy as np
 
 from .attention_engine import AttentionEngine
 from .camera_capture import CameraCapture
@@ -21,6 +20,8 @@ def parse_args():
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--fps", type=int, default=30)
+    parser.add_argument("--vcam-backend", default=None)
+    parser.add_argument("--vcam-device", default=None)
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--user-id", default="desktop-user")
     parser.add_argument("--backend-url", default="http://127.0.0.1:8000")
@@ -103,14 +104,33 @@ def main():
     gaze = GazeTracker(model_path=args.gaze_model_path)
 
     capture.start()
-    vcam.start()
+    vcam.start(preferred_backend=args.vcam_backend, preferred_device=args.vcam_device)
 
-    print("Virtual camera started")
+    startup_payload = {
+        "mode": "virtual-camera",
+        "camera_id": capture.camera_id,
+        "camera_backend": capture.backend_name,
+        "virtual_camera_backend": vcam.backend,
+        "virtual_camera_device": vcam.device,
+        "width": vcam.width,
+        "height": vcam.height,
+        "fps": vcam.fps,
+    }
+
+    if vcam.backend == "obs":
+        startup_payload["note"] = (
+            "OBS installs the virtual camera device, but OBS itself is not a reliable place to preview "
+            "its own built-in virtual camera as an input. Use Meet, Zoom, or Teams for validation."
+        )
+
+    print("Virtual camera started", flush=True)
     print(
         f"Using webcam index {capture.camera_id} via {capture.backend_name} and publishing "
-        f"{args.width}x{args.height}@{args.fps}"
+        f"{vcam.width}x{vcam.height}@{args.fps} to {vcam.device} via {vcam.backend}",
+        flush=True,
     )
-    print("Press Ctrl+C to stop")
+    print(f"ENGAGEX_READY {json.dumps(startup_payload, separators=(',', ':'))}", flush=True)
+    print("Press Ctrl+C to stop", flush=True)
 
     last_send = 0.0
     consecutive_empty_frames = 0
@@ -124,17 +144,21 @@ def main():
                 if consecutive_empty_frames == 1 or consecutive_empty_frames % 30 == 0:
                     print(
                         f"No frame received from webcam index {capture.camera_id}. "
-                        "Make sure OBS, Zoom, Meet, or a browser is not holding the real camera."
+                        "Make sure OBS, Zoom, Meet, or a browser is not holding the real camera.",
+                        flush=True,
                     )
 
                 if consecutive_empty_frames >= max(10, args.fps):
-                    print("Trying to reopen the webcam...")
+                    print("Trying to reopen the webcam...", flush=True)
                     try:
                         capture.restart()
-                        print(f"Recovered webcam on index {capture.camera_id} via {capture.backend_name}")
+                        print(
+                            f"Recovered webcam on index {capture.camera_id} via {capture.backend_name}",
+                            flush=True,
+                        )
                         consecutive_empty_frames = 0
                     except RuntimeError as exc:
-                        print(f"Webcam recovery failed: {exc}")
+                        print(f"Webcam recovery failed: {exc}", flush=True)
                         time.sleep(1.0)
                         continue
 
@@ -154,26 +178,23 @@ def main():
                 args.user_id,
             )
 
-            preview_frame = cv2.resize(processed, (args.width, args.height))
-            output_frame = cv2.cvtColor(preview_frame, cv2.COLOR_BGR2RGB)
-            output_frame = np.ascontiguousarray(output_frame)
-
-            vcam.push(output_frame)
+            vcam.push(processed)
 
             now = time.time()
             if now - last_send >= args.send_interval:
                 sent = post_score_event(args.backend_url, event)
                 if not sent:
-                    print(f"Warning: could not send score to {args.backend_url.rstrip('/')}")
+                    print(f"Warning: could not send score to {args.backend_url.rstrip('/')}", flush=True)
                 last_send = now
 
             if args.show_preview:
+                preview_frame = cv2.resize(processed, (args.width, args.height))
                 cv2.imshow("EngageX Virtual Camera Preview", preview_frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 
     except KeyboardInterrupt:
-        print("Stopping...")
+        print("Stopping...", flush=True)
 
     finally:
         capture.stop()

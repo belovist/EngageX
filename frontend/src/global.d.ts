@@ -8,6 +8,23 @@ declare global {
     error?: string
   }
 
+  type EngageXStartProcessResult = {
+    ok: boolean
+    error?: string
+  }
+
+  type EngageXVirtualCameraStartResult = EngageXStartProcessResult & {
+    mode?: 'virtual-camera'
+    camera_id?: number
+    camera_backend?: string
+    virtual_camera_backend?: string
+    virtual_camera_device?: string
+    width?: number
+    height?: number
+    fps?: number
+    note?: string
+  }
+
   interface Window {
     api?: {
       fetchSession: (config: {
@@ -25,7 +42,7 @@ declare global {
         cameraId?: number
         intervalSec?: number
         preview?: boolean
-      }) => { ok: boolean; error?: string }
+      }) => Promise<EngageXStartProcessResult>
       startVirtualCamera: (config: {
         sessionId: string
         userId: string
@@ -33,7 +50,7 @@ declare global {
         cameraId?: number
         intervalSec?: number
         preview?: boolean
-      }) => { ok: boolean; error?: string }
+      }) => Promise<EngageXVirtualCameraStartResult>
       stopClient: () => { ok: boolean }
     }
   }

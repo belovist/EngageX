@@ -27,6 +27,17 @@ type SessionDetail = {
 
 type RunMode = 'local-client' | 'virtual-camera'
 
+type VirtualCameraInfo = {
+  cameraId: number
+  cameraBackend: string
+  device: string
+  backend: string
+  width: number
+  height: number
+  fps: number
+  note?: string
+}
+
 function normalizeServerUrl(input: string): string {
   const trimmed = input.trim()
   if (!trimmed) return ''
@@ -103,6 +114,7 @@ export default function ParticipantApp() {
   const [statusMessage, setStatusMessage] = useState('Enter server IP, session ID, and user ID.')
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null)
   const [runningMode, setRunningMode] = useState<RunMode | null>(null)
+  const [virtualCameraInfo, setVirtualCameraInfo] = useState<VirtualCameraInfo | null>(null)
 
   useEffect(() => {
     window.localStorage.setItem('engagex.participant.server', serverInput)
@@ -177,46 +189,70 @@ export default function ParticipantApp() {
         setStatusMessage(`Could not reach the admin laptop at ${serverUrl}.`)
       }
       setRunningMode(null)
+      setVirtualCameraInfo(null)
       return
     }
 
-    const result =
-      mode === 'virtual-camera'
-        ? window.api?.startVirtualCamera({
-            sessionId: trimmedSessionId,
-            userId: trimmedUserId,
-            serverUrl,
-            intervalSec: 3,
-            cameraId: 0,
-            preview: showPreview,
-          })
-        : window.api?.startClient({
-            sessionId: trimmedSessionId,
-            userId: trimmedUserId,
-            serverUrl,
-            intervalSec: 3,
-            cameraId: 0,
-            preview: showPreview,
-          })
+    if (mode === 'virtual-camera') {
+      const result = await window.api?.startVirtualCamera({
+        sessionId: trimmedSessionId,
+        userId: trimmedUserId,
+        serverUrl,
+        intervalSec: 3,
+        cameraId: 0,
+        preview: showPreview,
+      })
+
+      if (!result?.ok) {
+        setStatusMessage(result?.error || 'Virtual camera did not finish starting.')
+        setRunningMode(null)
+        setVirtualCameraInfo(null)
+        return
+      }
+
+      const info: VirtualCameraInfo = {
+        cameraId: Number(result.camera_id ?? 0),
+        cameraBackend: result.camera_backend || 'unknown',
+        device: result.virtual_camera_device || 'OBS Virtual Camera',
+        backend: result.virtual_camera_backend || 'unknown',
+        width: Number(result.width ?? 0),
+        height: Number(result.height ?? 0),
+        fps: Number(result.fps ?? 0),
+        note: result.note,
+      }
+
+      setVirtualCameraInfo(info)
+      setRunningMode(mode)
+      setStatusMessage(`Virtual camera running for ${trimmedUserId}. In Meet, Zoom, or Teams choose "${info.device}".`)
+      return
+    }
+
+    const result = await window.api?.startClient({
+      sessionId: trimmedSessionId,
+      userId: trimmedUserId,
+      serverUrl,
+      intervalSec: 3,
+      cameraId: 0,
+      preview: showPreview,
+    })
 
     if (!result?.ok) {
       setStatusMessage(result?.error || 'Desktop client bridge is unavailable.')
       setRunningMode(null)
+      setVirtualCameraInfo(null)
       return
     }
 
+    setVirtualCameraInfo(null)
     setRunningMode(mode)
-    setStatusMessage(
-      mode === 'virtual-camera'
-        ? `Virtual camera running for ${trimmedUserId}. Select the virtual camera in Zoom, Meet, or Teams.`
-        : `Client running for ${trimmedUserId} in ${trimmedSessionId}.`
-    )
+    setStatusMessage(`Client running for ${trimmedUserId} in ${trimmedSessionId}.`)
   }
 
   const handleStop = () => {
     const stopped = window.api?.stopClient()
     const activeMode = runningMode
     setRunningMode(null)
+    setVirtualCameraInfo(null)
 
     if (stopped?.ok) {
       setStatusMessage(activeMode === 'virtual-camera' ? 'Virtual camera stopped.' : 'Client stopped.')
@@ -273,13 +309,13 @@ export default function ParticipantApp() {
               onClick={() => void handleStart('local-client')}
               className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
             >
-              Start Local Client
+              Start Local Client (Scores Only)
             </button>
             <button
               onClick={() => void handleStart('virtual-camera')}
               className="rounded-xl bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
             >
-              Start Virtual Camera
+              Start Virtual Camera (Meeting Feed)
             </button>
             <button
               onClick={handleStop}
@@ -300,7 +336,7 @@ export default function ParticipantApp() {
           </label>
 
           <p className="mt-3 text-xs text-slate-500">
-            Use local client mode for score-only LAN updates. For virtual camera mode, start EngageX first, then open Zoom, Meet, Teams, or OBS and select the virtual camera there. Do not let another app grab the real webcam first. The preview window is the best sanity check if OBS shows a black self-preview.
+            Use local client mode for score-only LAN updates. For meeting video, the status below must say Virtual Camera and the preview window title should say EngageX Virtual Camera Preview. If it says Local Client or the preview window title says EngageX Participant, the virtual camera is not running yet.
           </p>
 
           <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
@@ -312,6 +348,29 @@ export default function ParticipantApp() {
               Active Mode: {runningMode === 'virtual-camera' ? 'Virtual Camera' : runningMode === 'local-client' ? 'Local Client' : 'Idle'}
             </p>
             <p className="mt-2 text-xs text-slate-500">{serverUrl || 'Waiting for a valid backend URL'}</p>
+
+            {runningMode === 'virtual-camera' && virtualCameraInfo && (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+                  <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Output Device</p>
+                  <p className="mt-2 text-sm font-semibold text-sky-300">{virtualCameraInfo.device}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {virtualCameraInfo.width}x{virtualCameraInfo.height} @ {virtualCameraInfo.fps} FPS
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+                  <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Capture Path</p>
+                  <p className="mt-2 text-sm font-semibold text-emerald-300">
+                    Webcam {virtualCameraInfo.cameraId} via {virtualCameraInfo.cameraBackend}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">Virtual camera backend: {virtualCameraInfo.backend}</p>
+                </div>
+              </div>
+            )}
+
+            {runningMode === 'virtual-camera' && virtualCameraInfo?.note && (
+              <p className="mt-4 text-xs text-amber-300">{virtualCameraInfo.note}</p>
+            )}
           </div>
         </section>
 
@@ -397,7 +456,7 @@ export default function ParticipantApp() {
                 <li>1. Get the server IP and session ID from the admin laptop.</li>
                 <li>2. Enter them here with your user ID.</li>
                 <li>3. Start Local Client for score-only LAN mode.</li>
-                <li>4. Start Virtual Camera before opening the meeting app that should use the EngageX camera feed.</li>
+                <li>4. Start Virtual Camera before opening the meeting app that should use the EngageX camera feed, then pick the Output Device shown above.</li>
               </ol>
             </div>
           </div>
