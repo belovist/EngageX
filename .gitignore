@@ -74,6 +74,7 @@ desktop.ini
 output/
 results/
 logs/
+experiment_results/
 
 # Generated files
 attention_metrics.json
